@@ -277,7 +277,7 @@ function LeadDetail({
               <dt>Email</dt>
               <dd>
                 {lead.lead.email ? (
-                  <a href={`mailto:${lead.lead.email}`}>{lead.lead.email}</a>
+                  <a href={`mailto:${encodeURIComponent(lead.lead.email)}`}>{lead.lead.email}</a>
                 ) : (
                   "Not provided"
                 )}
@@ -287,7 +287,7 @@ function LeadDetail({
               <dt>Phone</dt>
               <dd>
                 {lead.lead.phone ? (
-                  <a href={`tel:${lead.lead.phone}`}>{lead.lead.phone}</a>
+                  <a href={`tel:${encodeURIComponent(lead.lead.phone)}`}>{lead.lead.phone}</a>
                 ) : (
                   "Not provided"
                 )}
@@ -476,10 +476,12 @@ export default function Home() {
     if (!selected) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (
         target instanceof HTMLElement &&
         (target.isContentEditable ||
-          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+          target.closest("button, a, [role='tab'], [role='menu'], [role='menuitem']"))
       ) {
         return;
       }
@@ -555,9 +557,9 @@ export default function Home() {
             One clear next step, ranked by the strength of each conversation.
           </p>
           <span className="desk-count">
-            <strong>{ranked.length}</strong> ready{" "}
+            <strong>{ranked.length}</strong> ready on this page{" "}
             <span aria-hidden="true">·</span> {state.rejected.length} held for
-            review
+            review <span aria-hidden="true">·</span> {state.leadCount} total
           </span>
         </div>
         <div className="desk-toolbar">
@@ -578,8 +580,7 @@ export default function Home() {
             <p className="eyebrow">NO LEADS YET</p>
             <h2>Your next conversation starts here.</h2>
             <p>
-              Add an inquiry to create a ranked lead desk. Import options will
-              appear when the intake API contract is connected.
+              No leads are available for this workspace.
             </p>
           </Card>
         ) : featured ? (
@@ -687,7 +688,7 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <ol className="lead-list" aria-label="Ranked leads" aria-live="polite">
+          <ol className="lead-list" aria-label="Ranked leads">
             {queue.map((lead, index) => (
               <LeadRow
                 key={lead.lead.id}
@@ -699,6 +700,27 @@ export default function Home() {
           </ol>
           {queue.length === 0 && featured ? (
             <p className="queue-empty">No other leads in this view.</p>
+          ) : null}
+          {state.leadCount > state.pageSize ? (
+            <div className="queue-pagination" role="group" aria-label="Lead pages">
+              <Button
+                size="small"
+                disabled={state.pageOffset === 0}
+                onClick={() => void reload(Math.max(0, state.pageOffset - state.pageSize))}
+              >
+                Previous page
+              </Button>
+              <span>
+                Page {Math.floor(state.pageOffset / state.pageSize) + 1} of {Math.ceil(state.leadCount / state.pageSize)}
+              </span>
+              <Button
+                size="small"
+                disabled={state.pageOffset + state.pageSize >= state.leadCount}
+                onClick={() => void reload(state.pageOffset + state.pageSize)}
+              >
+                Next page
+              </Button>
+            </div>
           ) : null}
         </section>
       </div>

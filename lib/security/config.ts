@@ -5,7 +5,7 @@ export const ROUTE_SECURITY_CONFIG = {
   maxPrioritizeLeads: 12,
   maxIntakeRequestBytes: 2_000_000,
   maxPrioritizeRequestBytes: 64_000,
-  maxAgentTimeoutMs: 15_000,
+  maxAgentTimeoutMs: 10_000,
   maxAgentConcurrency: 3,
   maxLeadMessageChars: 4_000,
 } as const;

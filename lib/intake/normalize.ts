@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LeadSchema, type Lead } from "../types/lead";
-import { DEFAULT_CURRENCY } from "./config";
+import { DEFAULT_CURRENCY, INTAKE_LIMITS } from "./config";
 
 type RecordValue = Record<string, unknown>;
 
@@ -33,9 +33,8 @@ export function normalizePhone(value: unknown): string | undefined {
   const raw = textValue(value);
   if (!raw) return undefined;
   const digits = raw.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length >= 7 && digits.length <= 15 && raw.trim().startsWith("+")) return `+${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  if (digits.length >= 7 && digits.length <= 15) return `+${digits}`;
   return undefined;
 }
 
@@ -54,9 +53,21 @@ export function parseBudget(value: unknown): Lead["budget"] {
   }
 
   if (typeof value === "string") {
-    const amounts = [...value.matchAll(/\$?\s*\d[\d,]*(?:\.\d+)?\s*[kKmM]?/g)]
+    const matches = [...value.matchAll(/\$?\s*\d[\d,]*(?:\.\d+)?\s*[kKmM]?/g)];
+    const amounts = matches
+      .filter((match) => {
+        const amount = parseAmount(match[0]);
+        const suffix = value.slice((match.index ?? 0) + match[0].length);
+        return amount !== undefined && amount >= 1_000 && !/^\s*(?:bed(?:room)?s?|br|bath(?:room)?s?)\b/i.test(suffix);
+      })
       .map(([amount]) => parseAmount(amount))
       .filter((amount): amount is number => amount !== undefined);
+    if (amounts.length === 1 && /\b(?:under|up\s+to|at\s+most|maximum|max\.?|no\s+more\s+than)\b/i.test(value)) {
+      return { max: amounts[0], currency: DEFAULT_CURRENCY };
+    }
+    if (amounts.length === 1 && /\b(?:over|above|from|at\s+least|minimum|min\.?)\b/i.test(value)) {
+      return { min: amounts[0], currency: DEFAULT_CURRENCY };
+    }
     if (amounts.length >= 2) {
       return { min: Math.min(amounts[0]!, amounts[1]!), max: Math.max(amounts[0]!, amounts[1]!), currency: DEFAULT_CURRENCY };
     }
@@ -83,6 +94,23 @@ export function normalizeDate(value: unknown, fallback = new Date()): string {
   return Number.isNaN(date.getTime()) ? fallback.toISOString() : date.toISOString();
 }
 
+function normalizeReceivedAt(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return new Date().toISOString();
+  if (value instanceof Date || typeof value === "number") {
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) {
+    return undefined;
+  }
+  const datePart = value.slice(0, 10);
+  const calendarDate = new Date(`${datePart}T00:00:00.000Z`);
+  if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== datePart) return undefined;
+  const date = new Date(value.length === 10 ? `${value}T00:00:00.000Z` : value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
 export function parseTimeline(value: unknown): Lead["timeline"] {
   const timeline = asRecord(value);
   const phrase = typeof value === "string"
@@ -91,8 +119,8 @@ export function parseTimeline(value: unknown): Lead["timeline"] {
   const normalized = phrase.toLowerCase();
   let urgency: Lead["timeline"]["urgency"];
   if (/\b(asap|immediate|right away|now)\b/.test(normalized)) urgency = "IMMEDIATE";
-  else if (/\b(30 days|one month|within a month|this month)\b/.test(normalized)) urgency = "WITHIN_30_DAYS";
-  else if (/\b(3 months|90 days|quarter|this season|spring|summer|fall|autumn|winter)\b/.test(normalized)) urgency = "WITHIN_3_MONTHS";
+  else if (/\b(\d+\s+weeks?|next week|this weekend|30 days|one month|within a month|this month)\b/.test(normalized)) urgency = "WITHIN_30_DAYS";
+  else if (/\b(3 months|90 days|quarter|within a quarter)\b/.test(normalized)) urgency = "WITHIN_3_MONTHS";
   else if (/\b(flexible|not sure|someday|no rush|open)\b/.test(normalized)) urgency = "FLEXIBLE";
   else if (phrase === "IMMEDIATE" || phrase === "WITHIN_30_DAYS" || phrase === "WITHIN_3_MONTHS" || phrase === "FLEXIBLE") urgency = phrase;
 
@@ -118,7 +146,8 @@ export function normalizeLeadRecord(
   const record = asRecord(input);
   const propertyRecord = asRecord(firstValue(record, "property", "listing"));
   const engagementRecord = asRecord(record.engagement);
-  const receivedAt = normalizeDate(firstValue(record, "receivedAt", "received_at", "createdAt", "date"));
+  const receivedAt = normalizeReceivedAt(firstValue(record, "receivedAt", "received_at", "createdAt", "date"));
+  if (!receivedAt) return { error: "receivedAt: use an unambiguous ISO date or timestamp." };
   const name = textValue(firstValue(record, "name", "fullName", "contactName", "buyerName"));
   const email = normalizeEmail(firstValue(record, "email", "contactEmail", "buyerEmail"));
   const phone = normalizePhone(firstValue(record, "phone", "contactPhone", "buyerPhone"));
@@ -128,8 +157,12 @@ export function normalizeLeadRecord(
   const city = textValue(firstValue(propertyRecord, "city")) ?? textValue(record.city);
   const propertyType = textValue(firstValue(propertyRecord, "propertyType", "type", "property_type")) ?? textValue(firstValue(record, "propertyType", "property_type"));
   const messageValue = firstValue(record, "message", "notes", "note", "comments");
+  const message = typeof messageValue === "string" ? messageValue : "";
+  if (message.length > INTAKE_LIMITS.maxMessageChars) {
+    return { error: `message: must be ${INTAKE_LIMITS.maxMessageChars} characters or fewer.` };
+  }
   const candidate: unknown = {
-    id: textValue(record.id) ?? randomUUID(),
+    id: randomUUID(),
     source,
     receivedAt,
     ...(name ? { name } : {}),
@@ -143,7 +176,7 @@ export function normalizeLeadRecord(
     },
     budget: parseBudget(firstValue(record, "budget", "budgetRange", "budget_range", "priceRange")),
     timeline: parseTimeline(firstValue(record, "timeline", "timeframe", "moveIn")),
-    message: typeof messageValue === "string" ? messageValue : "",
+    message,
     engagement: {
       replyCount: numericCount(firstValue(engagementRecord, "replyCount", "reply_count")),
       viewCount: numericCount(firstValue(engagementRecord, "viewCount", "view_count")),

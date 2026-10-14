@@ -51,27 +51,27 @@ export async function createLeadAgent(options: CreateLeadAgentOptions): Promise<
       ? { apiKey: options.apiKey ?? process.env.OPENAI_API_KEY }
       : {}),
   });
-  const agent = await createHarness({
-    model,
-    systemPrompt: AGENT_SYSTEM_PROMPT,
-    tools: [createGetLeadTool({
-      repository: options.repository,
-      maxMessageChars: options.maxMessageChars ?? parseMessageLimit(),
-    })],
-    structuredOutputSchema: AssessmentSchema,
-    builtinTools: [],
-    builtinPlugins: [],
-    session: false,
-    skills: false,
-    memory: false,
-    contextManager: false,
-    caching: false,
-    backgroundTasks: false,
-    printer: false,
-    retryStrategy: null,
-  });
-
   return async (input) => {
+    const agent = await createHarness({
+      model,
+      systemPrompt: AGENT_SYSTEM_PROMPT,
+      tools: [createGetLeadTool({
+        repository: options.repository,
+        allowedLeadId: input.leadId,
+        maxMessageChars: options.maxMessageChars ?? parseMessageLimit(),
+      })],
+      structuredOutputSchema: AssessmentSchema,
+      builtinTools: [],
+      builtinPlugins: [],
+      session: false,
+      skills: false,
+      memory: false,
+      contextManager: false,
+      caching: false,
+      backgroundTasks: false,
+      printer: false,
+      retryStrategy: null,
+    });
     const result = await agent.invoke(buildUserPrompt(input), {
       ...(input.signal ? { cancelSignal: input.signal } : {}),
     });

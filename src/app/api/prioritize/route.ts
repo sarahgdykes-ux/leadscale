@@ -3,7 +3,7 @@ import { createLeadAgent } from "../../../../lib/agent/agent";
 import { mockModelRunner } from "../../../../lib/agent/mockRunner";
 import { AGENT_PROMPT_VERSION, PRIORITIZE_CONFIG, PrioritizeResultSchema, prioritizeLeads } from "../../../../lib/agent/prioritize";
 import { getLeadRepository } from "../../../../lib/data";
-import { leadAssessmentInputHash } from "../../../../lib/data/leadHash";
+import { hashValue, leadAssessmentInputHash } from "../../../../lib/data/leadHash";
 import { hasFreshAssessment } from "../../../../lib/data/assessmentCache";
 import { randomUUID } from "node:crypto";
 import { getMockSimulation, waitForDemoSimulation } from "../../../../lib/demo/simulations";
@@ -11,6 +11,9 @@ import { guardProtectedRoute } from "../../../../lib/security/routeGuard";
 import { ROUTE_SECURITY_CONFIG } from "../../../../lib/security/config";
 import { decodeRequestText, readBoundedBytes } from "../../../../lib/intake/http";
 import { validateAndConstrain } from "../../../../lib/agent/validateAssessment";
+import { AGENT_SYSTEM_PROMPT } from "../../../../lib/agent/instructions";
+import { SCORING_CONFIG } from "../../../../lib/agent/scoring";
+import { FILTER_CONFIG, filterLead } from "../../../../lib/filtering/leadFilter";
 
 // The current Vercel docs cap Hobby functions at 300 seconds; this bounded run fits comfortably below that limit.
 export const maxDuration = 120;
@@ -77,6 +80,18 @@ export async function POST(request: Request): Promise<Response> {
     if (mode !== "mock" && mode !== "live") {
       return errorResponse("INVALID_CONFIGURATION", "AGENT_MODE must be mock or live.", 500);
     }
+    const referenceTime = new Date(requestStartedAt).toISOString();
+    const selectedById = new Map(selectedLeads.map((lead) => [lead.id, lead]));
+    const cacheContextById = new Map(selectedLeads.map((lead) => {
+      const filtered = filterLead(lead, { now: referenceTime, batch: leads });
+      return [lead.id, {
+        mode,
+        model: mode === "live" ? process.env.AGENT_MODEL : "mock",
+        promptHash: hashValue(AGENT_SYSTEM_PROMPT),
+        scoringHash: hashValue({ scoring: SCORING_CONFIG, filtering: FILTER_CONFIG }),
+        flags: filtered.status === "flagged" ? filtered.flags : [],
+      }] as const;
+    }));
     let modelRunner = mockModelRunner;
     if (simulation === "fallback" && mode === "mock") {
       modelRunner = async () => { throw new Error("Requested mock fallback simulation."); };
@@ -100,7 +115,7 @@ export async function POST(request: Request): Promise<Response> {
     const stored = await repository.getLatestAssessments(selectedLeads.map((lead) => lead.id));
     const cacheHits = (simulation === "fallback" ? [] : selectedLeads).flatMap((lead) => {
       const cached = stored[lead.id];
-      if (!hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION) || !cached) return [];
+      if (!hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, cacheContextById.get(lead.id)) || !cached) return [];
       return [{
         lead,
         assessment: cached.assessment,
@@ -117,7 +132,6 @@ export async function POST(request: Request): Promise<Response> {
     });
     const cacheIds = new Set(cacheHits.map(({ lead }) => lead.id));
     const leadsToPrioritize = selectedLeads.filter((lead) => !cacheIds.has(lead.id));
-    const selectedById = new Map(selectedLeads.map((lead) => [lead.id, lead]));
     let validationFailureCount = 0;
     let modelCallCount = 0;
     const monitoredRunner = async (input: Parameters<typeof modelRunner>[0]): Promise<unknown> => {
@@ -136,27 +150,33 @@ export async function POST(request: Request): Promise<Response> {
     const fresh = await prioritizeLeads(leadsToPrioritize, {
       modelRunner: monitoredRunner,
       filterBatch: leads,
+      now: referenceTime,
       timeoutMs: readPositiveInteger("AGENT_TIMEOUT_MS", PRIORITIZE_CONFIG.defaultTimeoutMs, ROUTE_SECURITY_CONFIG.maxAgentTimeoutMs),
       concurrency: readPositiveInteger("AGENT_CONCURRENCY", PRIORITIZE_CONFIG.defaultConcurrency, ROUTE_SECURITY_CONFIG.maxAgentConcurrency),
     });
-    await repository.saveAssessments(fresh.meta.map((meta) => {
-      const prioritized = fresh.ranked.find((item) => item.lead.id === meta.leadId);
-      if (!prioritized) throw new Error("Assessment result is missing its lead.");
-      return {
-        leadId: meta.leadId,
-        assessment: prioritized.assessment,
-        source: meta.source,
-        promptVersion: meta.promptVersion,
-        adjustments: meta.adjustments,
-        flags: meta.flags,
-        inputHash: leadAssessmentInputHash(selectedById.get(meta.leadId) ?? prioritized.lead, meta.promptVersion),
-      };
-    }));
-    await repository.saveRejected(fresh.rejected.map(({ lead, reasons }) => ({
-      leadId: lead.id,
-      raw: lead.rawSourceData,
-      reasons,
-    })));
+    if (!simulation) {
+      await repository.saveAssessments(fresh.meta.map((meta) => {
+        const prioritized = fresh.ranked.find((item) => item.lead.id === meta.leadId);
+        if (!prioritized) throw new Error("Assessment result is missing its lead.");
+        return {
+          leadId: meta.leadId,
+          assessment: prioritized.assessment,
+          source: meta.source,
+          promptVersion: meta.promptVersion,
+          adjustments: meta.adjustments,
+          flags: meta.flags,
+          inputHash: leadAssessmentInputHash(
+            selectedById.get(meta.leadId) ?? prioritized.lead,
+            cacheContextById.get(meta.leadId),
+          ),
+        };
+      }));
+      await repository.saveRejected(fresh.rejected.map(({ lead, reasons }) => ({
+        leadId: lead.id,
+        raw: lead.rawSourceData,
+        reasons,
+      })));
+    }
 
     const runId = randomUUID();
     const allMeta = [...fresh.meta, ...cacheHits.map(({ meta }) => meta)];
@@ -177,7 +197,7 @@ export async function POST(request: Request): Promise<Response> {
       p50LatencyMs: percentile(0.5),
       p95LatencyMs: percentile(0.95),
     } as const;
-    await repository.savePrioritizeRun(runSummary);
+    if (!simulation) await repository.savePrioritizeRun(runSummary);
     console.info(JSON.stringify({
       event: "prioritize_run",
       ...runSummary,

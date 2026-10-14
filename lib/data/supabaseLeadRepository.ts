@@ -4,6 +4,7 @@ import type {
   AssessmentToSave,
   IntakeEventStatus,
   LeadRepository,
+  LeadSaveResult,
   OperationalCounts,
   PrioritizeRunSummary,
   RejectedLeadToSave,
@@ -11,6 +12,7 @@ import type {
 } from "./leadRepository";
 import { leadAssessmentInputHash, leadContentHash, leadDedupeKey } from "./leadHash";
 import type { Database, Json } from "./supabaseDatabase.types";
+import { INTAKE_LIMITS } from "../intake/config";
 
 const SUPABASE_RESULT_PAGE_SIZE = 1_000;
 
@@ -31,6 +33,9 @@ function toJson(value: unknown): Json {
 
 function rowForLead(lead: Lead, id = lead.id) {
   const storedLead = LeadSchema.parse({ ...lead, id });
+  const leadPayload = Object.fromEntries(
+    Object.entries(storedLead).filter(([key]) => !["email", "phone", "rawSourceData"].includes(key)),
+  );
   return {
     id,
     source: storedLead.source,
@@ -43,12 +48,21 @@ function rowForLead(lead: Lead, id = lead.id) {
     timeline: toJson(storedLead.timeline),
     message: storedLead.message,
     engagement: toJson(storedLead.engagement),
-    lead: toJson(storedLead),
-    raw_source_data: toJson(storedLead.rawSourceData),
+    lead: toJson(leadPayload),
+    raw_source_data: toJson({}),
     content_hash: leadContentHash(storedLead),
     dedupe_key: leadDedupeKey(storedLead),
     updated_at: new Date().toISOString(),
   };
+}
+
+function leadFromRow(row: { lead: Json; email: string | null; phone: string | null }): Lead {
+  return LeadSchema.parse({
+    ...(typeof row.lead === "object" && row.lead !== null && !Array.isArray(row.lead) ? row.lead : {}),
+    email: row.email ?? undefined,
+    phone: row.phone ?? undefined,
+    rawSourceData: {},
+  });
 }
 
 export class SupabaseLeadRepository implements LeadRepository {
@@ -59,39 +73,39 @@ export class SupabaseLeadRepository implements LeadRepository {
   }
 
   async getById(id: string): Promise<Lead | null> {
-    const { data, error } = await this.client.from("leads").select("lead").eq("id", id).maybeSingle();
+    const { data, error } = await this.client.from("leads").select("lead, email, phone").eq("id", id).maybeSingle();
     if (error) throw new Error("Lead could not be retrieved from Supabase.");
-    return data ? LeadSchema.parse(data.lead) : null;
+    return data ? leadFromRow(data) : null;
   }
 
   async list(): Promise<Lead[]> {
-    const { data, error } = await this.client.from("leads").select("lead").order("received_at", { ascending: false });
+    const { data, error } = await this.client.from("leads").select("lead, email, phone").order("received_at", { ascending: false });
     if (error) throw new Error("Leads could not be retrieved from Supabase.");
-    return (data ?? []).map((row) => LeadSchema.parse(row.lead));
+    return (data ?? []).map(leadFromRow);
   }
 
-  async saveLeads(leads: readonly Lead[]): Promise<void> {
-    for (const candidate of leads) {
-      const lead = LeadSchema.parse(candidate);
-      const dedupeKey = leadDedupeKey(lead);
-      const { data: existing, error: lookupError } = await this.client
-        .from("leads")
-        .select("id, received_at")
-        .eq("dedupe_key", dedupeKey)
-        .maybeSingle();
-      if (lookupError) throw new Error("Lead deduplication lookup failed.");
-      if (existing) {
-        if (Date.parse(lead.receivedAt) <= Date.parse(existing.received_at)) continue;
-        const row = rowForLead(lead, existing.id);
-        const { id: rowId, ...updates } = row;
-        void rowId;
-        const { error } = await this.client.from("leads").update(updates).eq("id", existing.id);
-        if (error) throw new Error("Lead update failed.");
-        continue;
-      }
-      const { error } = await this.client.from("leads").insert(rowForLead(lead));
-      if (error) throw new Error("Lead insert failed.");
-    }
+  async saveLeads(leads: readonly Lead[]): Promise<LeadSaveResult> {
+    if (leads.length === 0) return { saved: 0, merged: 0, skipped: 0 };
+    const uniqueById = new Map<string, Lead>();
+    for (const candidate of leads) uniqueById.set(candidate.id, LeadSchema.parse(candidate));
+    const uniqueLeads = [...uniqueById.values()];
+    const ids = uniqueLeads.map((lead) => lead.id);
+    const { data: existingRows, error: lookupError } = await this.client
+      .from("leads")
+      .select("id")
+      .in("id", ids);
+    if (lookupError) throw new Error("Existing lead IDs could not be checked.");
+    const existingIds = new Set((existingRows ?? []).map((row) => row.id));
+    const { error } = await this.client.from("leads").upsert(
+      uniqueLeads.map((lead) => rowForLead(lead)),
+      { onConflict: "id" },
+    );
+    if (error) throw new Error("Lead upsert failed.");
+    return {
+      saved: uniqueLeads.filter((lead) => !existingIds.has(lead.id)).length,
+      merged: uniqueLeads.filter((lead) => existingIds.has(lead.id)).length,
+      skipped: leads.length - uniqueLeads.length,
+    };
   }
 
   async saveAssessments(assessments: readonly AssessmentToSave[]): Promise<void> {
@@ -158,20 +172,28 @@ export class SupabaseLeadRepository implements LeadRepository {
       source,
       status: "pending",
       error: null,
+      updated_at: new Date().toISOString(),
     });
     if (error?.code === "23505") {
       const { data, error: lookupError } = await this.client.from("intake_events")
-        .select("status")
+        .select("status, updated_at")
         .eq("provider_message_id", providerMessageId)
         .maybeSingle();
       if (lookupError) throw new Error("Intake event status could not be retrieved.");
-      if (data?.status !== "failed") return false;
-      const { error: retryError } = await this.client.from("intake_events")
-        .update({ status: "pending", error: null })
+      if (!data) return false;
+      const now = new Date();
+      const retryFailed = data.status === "failed";
+      const stalePending = data.status === "pending" &&
+        now.getTime() - Date.parse(data.updated_at) >= INTAKE_LIMITS.pendingEventLeaseMs;
+      if (!retryFailed && !stalePending) return false;
+      let retry = this.client.from("intake_events")
+        .update({ status: "pending", error: null, updated_at: now.toISOString() })
         .eq("provider_message_id", providerMessageId)
-        .eq("status", "failed");
+        .eq("status", data.status);
+      if (stalePending) retry = retry.lt("updated_at", new Date(now.getTime() - INTAKE_LIMITS.pendingEventLeaseMs).toISOString());
+      const { data: claimed, error: retryError } = await retry.select("id");
       if (retryError) throw new Error("Failed intake event could not be retried.");
-      return true;
+      return (claimed?.length ?? 0) > 0;
     }
     if (error) throw new Error("Intake event could not be recorded.");
     return true;
@@ -179,7 +201,7 @@ export class SupabaseLeadRepository implements LeadRepository {
 
   async finishIntakeEvent(providerMessageId: string, status: IntakeEventStatus, message?: string): Promise<void> {
     const { error } = await this.client.from("intake_events")
-      .update({ status, error: message ?? null })
+      .update({ status, error: message ?? null, updated_at: new Date().toISOString() })
       .eq("provider_message_id", providerMessageId);
     if (error) throw new Error("Intake event status could not be updated.");
   }

@@ -26,10 +26,15 @@ export type LeadDeskState =
       ranked: DeskLead[];
       rejected: PrioritizeResult["rejected"];
       leadCount: number;
+      pageOffset: number;
+      pageSize: number;
     };
 
-async function loadDeskState(): Promise<LeadDeskState> {
-  const [result, leads] = await Promise.all([fetchPrioritized(), fetchLeads()]);
+async function loadDeskState(offset = 0): Promise<LeadDeskState> {
+  const page = await fetchLeads(offset);
+  const result = page.leads.length > 0
+    ? await fetchPrioritized(page.leads.map((lead) => lead.id))
+    : { ranked: [], rejected: [], meta: [] } satisfies PrioritizeResult;
   const metaById = new Map(result.meta.map((meta) => [meta.leadId, meta]));
   const ranked = result.ranked.map((entry) => {
     const meta = metaById.get(entry.lead.id);
@@ -45,7 +50,9 @@ async function loadDeskState(): Promise<LeadDeskState> {
     status: "ready",
     ranked,
     rejected: result.rejected,
-    leadCount: leads.length,
+    leadCount: page.total,
+    pageOffset: page.offset,
+    pageSize: page.limit,
   };
 }
 
@@ -61,6 +68,7 @@ function errorState(error: unknown): LeadDeskState {
 
 export function useLeadDesk() {
   const [state, setState] = useState<LeadDeskState>({ status: "loading" });
+  const [pageOffset, setPageOffset] = useState(0);
 
   useEffect(() => {
     if (state.status !== "scoring") return;
@@ -86,10 +94,11 @@ export function useLeadDesk() {
     };
   }, []);
 
-  async function reload() {
+  async function reload(nextOffset = pageOffset) {
     setState({ status: "scoring" });
     try {
-      setState(await loadDeskState());
+      setState(await loadDeskState(nextOffset));
+      setPageOffset(nextOffset);
     } catch (error) {
       setState(errorState(error));
     }

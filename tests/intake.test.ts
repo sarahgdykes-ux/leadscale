@@ -23,7 +23,7 @@ const leadRow = {
   message: "Interested in touring this weekend.",
 };
 
-function validLead(id = randomUUID()): Lead {
+function validLead(id: string = randomUUID()): Lead {
   return LeadSchema.parse({
     id,
     source: "manual",
@@ -51,6 +51,11 @@ describe("CSV adapter", () => {
     expect(result.leads[0]?.rawSourceData).toMatchObject({ "FULL NAME": "Morgan Reed" });
   });
 
+  it("does not accept an externally supplied lead ID", async () => {
+    const result = await csvAdapter.parse("id,Name,Email,Message\nexisting-id,Buyer,buyer@example.test,Interested");
+    expect(result.leads[0]?.id).not.toBe("existing-id");
+  });
+
   it("handles messy quotes, reports invalid data with source row, and accepts empty input", async () => {
     const messy = await csvAdapter.parse('Name,Email,Message\n"Reed, Morgan",morgan@example.test,"Line 1\nLine 2"');
     const invalid = await csvAdapter.parse("Name,Email\n,not-an-email");
@@ -59,6 +64,11 @@ describe("CSV adapter", () => {
     expect(invalid.errors[0]?.row).toBe(2);
     expect(await csvAdapter.parse("")).toEqual({ leads: [], errors: [] });
   });
+
+  it("rejects CSV input without any recognized lead headers once", async () => {
+    const result = await csvAdapter.parse("MLS,Region\n12345,West\n67890,East");
+    expect(result.errors).toEqual([{ row: 1, message: "CSV does not contain any recognized lead columns." }]);
+  });
 });
 
 describe("manual adapter", () => {
@@ -66,7 +76,7 @@ describe("manual adapter", () => {
     const result = await manualAdapter.parse(leadRow);
     expect(result.errors).toEqual([]);
     expect(result.leads[0]?.budget).toEqual({ min: 450_000, max: 450_000, currency: "USD" });
-    expect(result.leads[0]?.phone).toBe("+15125550199");
+    expect(result.leads[0]?.phone).toBeUndefined();
     expect(result.leads[0]?.rawSourceData).toEqual(leadRow);
   });
 
@@ -117,7 +127,7 @@ describe("forwarded email adapter", () => {
       providerEmailId: "hostile-email",
       subject: "Unknown",
       from: "notify@example.test",
-      text: maliciousText,
+      text: `Contact Name: Pat Buyer\nContact Email: pat@example.test\n${maliciousText}`,
       rawSourceData: { untouched: true, text: maliciousText },
     });
     expect(htmlResult.leads[0]?.message).not.toContain("alert(1)");
@@ -130,6 +140,40 @@ describe("forwarded email adapter", () => {
     const result = await emailForwardAdapter.parse({ subject: "Unknown", text: "A notice with no lead details." });
     expect(result.leads).toEqual([]);
     expect(result.errors[0]?.row).toBe(1);
+  });
+
+  it("rejects overlong email messages before saving them", async () => {
+    const result = await emailForwardAdapter.parse({
+      subject: "Inquiry",
+      text: `Name: Buyer\nEmail: buyer@example.test\n${"x".repeat(4_001)}`,
+    });
+    expect(result.leads).toEqual([]);
+    expect(result.errors[0]?.message).toContain("4000 characters or fewer");
+  });
+
+  it("does not treat unlabelled or no-reply addresses in forwarded bodies as contacts", async () => {
+    const unlabelled = await emailForwardAdapter.parse({
+      subject: "Listing notice",
+      text: "noreply@listingsite.com\nFooter: sales@example.test\nA buyer wants to tour.",
+    });
+    const ignored = await emailForwardAdapter.parse({
+      subject: "Listing notice",
+      text: "Name: Buyer\nEmail: noreply@listingsite.com\nInterested in a home.",
+    });
+    expect(unlabelled.leads).toEqual([]);
+    expect(ignored.leads).toEqual([]);
+  });
+
+  it("saves separate inquiries from the same contact and reports persistence counts", async () => {
+    const repository = new InMemoryLeadRepository([]);
+    const first = LeadSchema.parse({ ...validLead("inquiry-one"), email: "same@example.test" });
+    const second = LeadSchema.parse({
+      ...validLead("inquiry-two"),
+      email: "same@example.test",
+      property: { address: "22 Pine Road" },
+    });
+    expect(await repository.saveLeads([first, second])).toEqual({ saved: 2, merged: 0, skipped: 0 });
+    expect(await repository.list()).toHaveLength(2);
   });
 });
 
@@ -181,9 +225,11 @@ describe("email webhook", () => {
           text: "Name: Retry Buyer\nEmail: retry@example.test\nI would like to tour.",
           html: null,
           created_at: "2026-10-14T12:00:00.000Z",
+          headers: { "authentication-results": "mx.example; spf=pass; dkim=pass" },
         };
       },
       repository,
+      allowedSenders: ["notify@example.test"],
     };
     const request = () => new Request("http://local.test/api/intake/email", {
       method: "POST",
@@ -193,10 +239,11 @@ describe("email webhook", () => {
     const first = await handleEmailWebhook(request(), dependencies);
     const retry = await handleEmailWebhook(request(), dependencies);
     expect(first.status).toBe(200);
-    expect(await first.json()).toMatchObject({ imported: 1, skipped: 0 });
-    expect(await retry.json()).toMatchObject({ imported: 0, skipped: 1 });
+    expect(await first.json()).toMatchObject({ imported: 1, saved: 1, merged: 0, skipped: 0 });
+    expect(await retry.json()).toMatchObject({ imported: 0, saved: 0, merged: 0, skipped: 1 });
     expect(retrievals).toBe(1);
     expect(await repository.list()).toHaveLength(1);
+    expect((await repository.list())[0]?.rawSourceData).not.toHaveProperty("receivedEmail.text");
   });
 });
 
@@ -260,8 +307,15 @@ describe("repository contract", () => {
     await repositoryContract(new SupabaseLeadRepository());
   });
 
-  it("only considers assessments reusable when both lead input and prompt version match", () => {
+  it("only considers assessments reusable when the lead and runtime context match", () => {
     const lead = validLead();
+    const cacheContext = {
+      mode: "mock",
+      model: "mock",
+      promptHash: "prompt-a",
+      scoringHash: "scoring-a",
+      flags: [],
+    };
     const cached = {
       leadId: lead.id,
       assessment: {
@@ -276,12 +330,59 @@ describe("repository contract", () => {
       promptVersion: AGENT_PROMPT_VERSION,
       adjustments: [],
       flags: [],
-      inputHash: leadAssessmentInputHash(lead, AGENT_PROMPT_VERSION),
+      inputHash: leadAssessmentInputHash(lead, cacheContext),
       createdAt: new Date().toISOString(),
     };
-    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION)).toBe(true);
-    expect(hasFreshAssessment({ ...lead, message: "Updated inquiry" }, cached, AGENT_PROMPT_VERSION)).toBe(false);
-    expect(hasFreshAssessment(lead, cached, "new-prompt-version")).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, cacheContext)).toBe(true);
+    expect(hasFreshAssessment({ ...lead, message: "Updated inquiry" }, cached, AGENT_PROMPT_VERSION, cacheContext)).toBe(false);
+    expect(hasFreshAssessment(lead, cached, "new-prompt-version", cacheContext)).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, { ...cacheContext, mode: "live" })).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, { ...cacheContext, model: "other-model" })).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, { ...cacheContext, promptHash: "prompt-b" })).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, { ...cacheContext, scoringHash: "scoring-b" })).toBe(false);
+    expect(hasFreshAssessment(lead, cached, AGENT_PROMPT_VERSION, { ...cacheContext, flags: ["STALE:"] })).toBe(false);
+  });
+
+  it("reclaims an email event after its pending lease expires", async () => {
+    let currentTime = Date.parse("2026-10-14T12:00:00.000Z");
+    const repository = new InMemoryLeadRepository([], () => new Date(currentTime));
+    expect(await repository.claimIntakeEvent("stale-event", "email-forward")).toBe(true);
+    expect(await repository.claimIntakeEvent("stale-event", "email-forward")).toBe(false);
+    currentTime += 5 * 60 * 1_000 + 1;
+    expect(await repository.claimIntakeEvent("stale-event", "email-forward")).toBe(true);
+  });
+
+  it("rejects email with failed SPF/DKIM authentication", async () => {
+    const repository = new InMemoryLeadRepository([]);
+    const webhookPayload = JSON.stringify({
+      type: "email.received",
+      data: { email_id: "provider-message-auth-fail", from: "notify@example.test" },
+    });
+    const response = await handleEmailWebhook(new Request("http://local.test/api/intake/email", {
+      method: "POST",
+      headers: {
+        "svix-id": "event-auth-fail",
+        "svix-timestamp": "1791979200",
+        "svix-signature": "v1,signed",
+      },
+      body: webhookPayload,
+    }), {
+      verify: (body) => JSON.parse(body) as unknown,
+      getReceivedEmail: async () => ({
+        id: "provider-message-1",
+        from: "notify@example.test",
+        subject: "Lead notification",
+        text: "Name: Buyer\nEmail: buyer@example.test",
+        html: null,
+        created_at: "2026-10-14T12:00:00.000Z",
+        headers: { "authentication-results": "mx.example; spf=fail; dkim=none" },
+      }),
+      repository,
+      allowedSenders: ["notify@example.test"],
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ imported: 0, skipped: 1 });
+    expect(await repository.list()).toHaveLength(0);
   });
 });
 

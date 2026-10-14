@@ -1,34 +1,32 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { AgentOutputSchema, LeadSchema, PrioritizedLeadSchema } from "@/contracts/lead";
-import { fakeScoreLeads } from "@/agent/mockScoring";
-import { seedLeads } from "@/data/seedLeads";
+import { describe, expect, it } from "vitest";
+import { AssessmentSchema, LeadSchema, priorityFromScore } from "../lib/types/lead";
+import { seedLeads } from "../lib/data/seedLeads";
 
-test("all seed leads satisfy the shared contract", () => {
-  assert.equal(LeadSchema.array().parse(seedLeads).length, 12);
+describe("active lead contract", () => {
+  it("accepts all six current seed leads", () => {
+    expect(LeadSchema.array().parse(seedLeads)).toHaveLength(6);
+  });
+
+  it("requires at least one contact method", () => {
+    const leadWithoutContact = { ...seedLeads[0], email: undefined, phone: undefined };
+    expect(LeadSchema.safeParse(leadWithoutContact).success).toBe(false);
+  });
+
+  it("restricts sources to values accepted by the database", () => {
+    expect(LeadSchema.safeParse({ ...seedLeads[0], source: "future-adapter" }).success).toBe(false);
+  });
 });
 
-test("seeded mock scores satisfy the agent output contract", () => {
-  const scored = fakeScoreLeads(seedLeads);
-  assert.equal(scored.length, seedLeads.length);
-  for (const lead of scored) PrioritizedLeadSchema.parse(lead);
-});
-
-test("contact method is required", () => {
-  const leadWithoutContact = { ...seedLeads[0], email: undefined, phone: undefined };
-  assert.equal(LeadSchema.safeParse(leadWithoutContact).success, false);
-});
-
-test("score and priority ranges must agree", () => {
-  assert.equal(
-    AgentOutputSchema.safeParse({
+describe("active assessment contract", () => {
+  it("accepts the frozen assessment shape and aligns priorities with score bands", () => {
+    expect(AssessmentSchema.safeParse({
       score: 85,
-      priority: "High",
-      reasons: ["Reason one", "Reason two"],
-      nextAction: "Follow up.",
+      priority: "URGENT",
+      reasons: ["Budget fits the property.", "The lead requested a tour."],
+      recommendedAction: "The assigned agent should confirm a tour today.",
       missingInformation: [],
-      confidence: 0.8,
-    }).success,
-    false,
-  );
+      confidence: "HIGH",
+    }).success).toBe(true);
+    expect(priorityFromScore(85)).toBe("URGENT");
+  });
 });

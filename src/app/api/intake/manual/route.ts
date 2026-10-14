@@ -26,11 +26,26 @@ export async function POST(request: Request): Promise<Response> {
   }
   const validated = ManualPayloadSchema.safeParse(body);
   if (!validated.success) return intakeError("INVALID_REQUEST", "Manual payload must be a lead object or an array of lead objects.", 400);
+  const payload = validated.data;
+  const records = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload.leads)
+      ? payload.leads
+      : undefined;
+  if (records && records.length > INTAKE_LIMITS.maxManualRecords) {
+    return intakeError("PAYLOAD_TOO_LARGE", "Manual payload exceeds the lead count limit.", 413);
+  }
 
-  const parsed = await manualAdapter.parse(validated.data);
+  const parsed = await manualAdapter.parse(payload);
   try {
-    await getLeadRepository().saveLeads(parsed.leads);
-    return Response.json({ imported: parsed.leads.length, skipped: parsed.errors.length, errors: parsed.errors });
+    const saved = await getLeadRepository().saveLeads(parsed.leads);
+    return Response.json({
+      imported: saved.saved + saved.merged,
+      saved: saved.saved,
+      merged: saved.merged,
+      skipped: saved.skipped + parsed.errors.length,
+      errors: parsed.errors,
+    });
   } catch {
     return intakeError("INTAKE_FAILED", "Manual leads could not be saved.", 500);
   }

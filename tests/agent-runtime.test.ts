@@ -11,6 +11,7 @@ import { createLeadAgent, type ModelRunner } from "../lib/agent/agent";
 import { POST } from "../src/app/api/prioritize/route";
 import { GET } from "../src/app/api/leads/route";
 import { PrioritizeResultSchema } from "../lib/agent/prioritize";
+import { isLeadSchemaValid, isRecentlyReengaged, isStaleLead } from "../lib/filtering/leadFilter";
 
 const originalMode = process.env.AGENT_MODE;
 
@@ -46,6 +47,13 @@ function uniqueLead(base: Lead, id: string, receivedAt: string): Lead {
 }
 
 describe("assessment governance", () => {
+  it("keeps demo seed dates fresh and preserves the re-engagement example", () => {
+    const now = new Date().toISOString();
+    expect(seedLeads.every((lead) => !isStaleLead(lead, now))).toBe(true);
+    const reengaged = seedLeads.find((lead) => lead.id === "re-engaged");
+    expect(reengaged && isLeadSchemaValid(reengaged) && isRecentlyReengaged(reengaged, now)).toBe(true);
+  });
+
   it("clamps scores to the deterministic +/-10 bound and recomputes priority", () => {
     const result = validateAndConstrain(assessment({ score: 90, priority: "LOW" }), 50, strongLead);
     expect(result.assessment.score).toBe(60);
@@ -90,6 +98,21 @@ describe("assessment governance", () => {
       50,
       strongLead,
     )).toThrow();
+  });
+
+  it("rejects common fair-housing proxies without rejecting ordinary wording", () => {
+    for (const proxy of ["The buyer mentioned two kids.", "The lead is attending church.", "The inquiry is from an elderly couple."]) {
+      expect(() => validateAndConstrain(
+        assessment({ reasons: [proxy, "A second factual reason."] }),
+        50,
+        strongLead,
+      )).toThrow();
+    }
+    expect(() => validateAndConstrain(
+      assessment({ reasons: ["The buyer is in a race to close.", "The budget score of 100 percent meets the requirement."] }),
+      50,
+      strongLead,
+    )).not.toThrow();
   });
 
   it("uses a deterministic fallback assessment", () => {
@@ -194,7 +217,17 @@ describe("get_lead tool", () => {
     const missing = await getLead.invoke({ leadId: "absent" });
     expect(found.status).toBe("found");
     expect(missing).toEqual({ status: "not_found", leadId: "absent" });
-    if (found.status === "found") expect("rawSourceData" in found.lead).toBe(false);
+    if (found.status === "found") {
+      expect("rawSourceData" in found.lead).toBe(false);
+      expect(found.lead.hasEmail).toBe(true);
+      expect("email" in found.lead).toBe(false);
+      expect("name" in found.lead).toBe(false);
+    }
+  });
+
+  it("does not allow a lead-specific tool instance to retrieve another lead", async () => {
+    const getLead = createGetLeadTool({ repository, allowedLeadId: "strong" });
+    expect(await getLead.invoke({ leadId: "weak" })).toEqual({ status: "not_found", leadId: "weak" });
   });
 
   it("wraps and truncates the untrusted lead message", async () => {
@@ -207,6 +240,7 @@ describe("get_lead tool", () => {
     const found = await getLead.invoke({ leadId: "long" });
     if (found.status !== "found") throw new Error("Expected lead to be found.");
     expect(found.lead.message).toBe("<lead_message>0123456789</lead_message>");
+    expect(found.lead.property.address).toBe("<lead_address>14 Oak Street</lead_address>");
   });
 });
 

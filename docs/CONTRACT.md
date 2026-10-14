@@ -1,52 +1,31 @@
 # Shared Contract
 
-## P0 dashboard
+## Active Contracts
 
-The first dashboard supports a ranked lead list, score, priority, 2-3 reasons, exactly one next action, missing information, confidence, and a lead detail view. The shared payload is `PrioritizedLead` in `src/contracts/lead.ts`; `Lead` remains the normalized intake record. Priority ranges are Low 0-39, Medium 40-64, High 65-84, and Urgent 85-100.
+The frozen normalized `Lead`, `Assessment`, prioritization logic, and result schemas live under `lib/types/lead.ts` and `lib/agent/prioritize.ts`. The repository seeds six demo leads with dates relative to the current time.
 
-Mock endpoints are ready immediately: `GET /api/leads` returns the 12 validated seed leads, `POST /api/prioritize` accepts `{}` or `{ "leads": [...] }` and returns deterministic fake scores, `GET /api/leads/{id}` returns a validated scored detail, and `GET /api/health` is the deployment smoke check. Mock scores are not agent recommendations.
+`GET /api/leads?offset=0&limit=12` returns at most 12 desk-safe leads. Pagination metadata is returned in `x-total-count`, `x-page-offset`, and `x-page-limit`; raw intake payloads are omitted. `POST /api/prioritize` accepts `{}` for up to 12 leads or `{ "leadIds": ["..."] }` for a selected subset. The `leads` property is not accepted. The desk requests and prioritizes one page at a time.
 
-## Decision boundary
+Prioritize results contain ranked `{ lead, assessment }` entries, rejected entries, and source/flag/adjustment metadata. Assessments are deterministically constrained to the pre-score, and cache keys include lead contents, runtime mode/model, current prompt/scoring/filter configuration, and derived flags.
 
-The Harness owns intake safety and triage: validate normalized records, detect/dedupe likely duplicate people while preserving source provenance, reject malformed or unusable records, and flag conflicts or missing fields for human review. The pass-through in `src/harness/filterLeads.ts` is only a stub.
+## Intake and Persistence
 
-The agent owns prioritization after Harness filtering: assign score and priority, cite 2-3 evidence-based reasons, provide one next action, list missing information, and return confidence. It must not silently repair conflicting source facts or claim certainty unsupported by the record. The stub is `src/agent/prioritizeLeads.ts`.
+CSV, manual, and Resend email intake are implemented under `lib/intake/` and `src/app/api/intake/`. Intake normalizes records with server-generated IDs and returns actual `saved`, `merged`, and `skipped` counts. Distinct inquiries remain distinct even when contact details match; duplicate flags are computed by the prioritization harness.
 
-## Retrieval tool
+The `LeadRepository` interface has in-memory and Supabase implementations under `lib/data/`. Supabase writes leads with primary-key upserts. Email webhook verification uses Svix signatures, a configured forwarding-sender allowlist, SPF/DKIM results, event idempotency, and stale-pending recovery.
 
-- Name: `get_lead`
-- Input: `{ "leadId": "<UUID>" }`, validated by `LeadRetrievalInputSchema`.
-- Output: one normalized `Lead` object or `null` when not found.
-- Caller: the agent layer only, when it needs the canonical lead record. It must not bypass the Harness intake boundary.
-- Stub: `createLeadRetrievalTool` in `src/agent/getLead.ts`; bind it to the repository implementation when persistence is ready. This is a domain contract, not a guessed Strands tool-registration call.
+## Agent Retrieval Tool
 
-## Data flow
+- Name: `get_lead`.
+- Input: `{ "leadId": "<string>" }`; IDs are not constrained to UUIDs.
+- Output: a `found`/`not_found` union.
+- Each lead invocation receives a tool bound to that one lead ID. Model-visible data excludes name, email, and phone values; it includes contact-presence booleans.
+- Untrusted message and property text is delimiter-wrapped. The tool does not return raw intake data.
 
-```mermaid
-flowchart LR
-  S[CSV / forwarded email / manual] --> A[Source adapter]
-  A --> N[Normalize to Lead]
-  N --> H[Harness filter: validate, dedupe, reject, flag]
-  H --> G[Agent: score, explain, recommend]
-  G --> P[PrioritizedLead]
-  P --> U[Lead desk UI]
-```
+## Legacy Scaffolding
 
-## Out of scope for this sprint
+The older files under `src/contracts/`, `src/agent/`, `src/adapters/`, `src/harness/`, `src/data/`, and `src/lib/` are legacy scaffolds and are not the active contracts or repository path. Use the corresponding `lib/` modules and `src/app/api/` handlers. The current lead-detail route reads the active repository and returns `{ "lead": Lead, "assessment"?: Assessment }`.
 
-- Production agent prompts, scoring logic, model selection, or live OpenAI calls.
-- Production Harness filtering and duplicate resolution.
-- Zillow, Realtor.com, or other direct listing-source integrations.
-- Production CSV/email parsing; CSV and email-forward adapters are explicit stubs.
-- Resend webhook signature verification and a final inbound payload mapping.
-- The real lead desk UI, authentication, roles, RLS policies, and production observability.
-- Automated outreach, CRM synchronization, scheduling, and property search.
+## Production Boundaries
 
-## Open items for Sarah and Shalinthia
-
-- Confirm score-range thresholds and whether score/priority consistency should be strict in production.
-- Agree duplicate identity rules, canonical-record selection, and whether duplicates appear in the dashboard.
-- Confirm field optionality, currency conventions, and whether seller leads need a distinct contract.
-- Confirm the actual Resend inbound event shape and webhook verification approach before implementing its adapter.
-- Choose the database/repository path used by the retrieval tool and define the required Supabase RLS policy.
-- Add CI checks and then make those checks required in the GitHub `main` branch ruleset.
+The browser must not receive `ROUTE_SHARED_SECRET`; production desk access still needs a trusted session or authenticated server proxy. Live Strands, Supabase, and Resend behavior has not been verified against configured services. Agree on a data-retention schedule and a shared rate-limit store before production deployment. See `docs/DEPLOYMENT.md`.

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DM_Sans, Fraunces } from "next/font/google";
+import { ServiceStatus } from "../components/lead/ServiceStatus";
 import "./globals.css";
 import "./lead-desk.css";
 
@@ -23,8 +24,6 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const fixtureMode = process.env.NEXT_PUBLIC_USE_FIXTURES !== "false";
-
   return (
     <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>
@@ -41,20 +40,12 @@ export default function RootLayout({
               <span className="brand-name">Leadscale</span>
             </Link>
             <div className="header-right">
-              <span
-                className={`mode-indicator ${fixtureMode ? "mode-indicator--fixtures" : "mode-indicator--api"}`}
-              >
-                <span className="mode-dot" aria-hidden="true" />
-                {fixtureMode ? "Demo data" : "API mode"}
-              </span>
+              <ServiceStatus />
               {process.env.NODE_ENV !== "production" ? (
                 <Link className="design-link" href="/design">
                   Design system
                 </Link>
               ) : null}
-              <span className="user-mark" role="img" aria-label="Shalinthia">
-                S
-              </span>
             </div>
           </header>
           {children}

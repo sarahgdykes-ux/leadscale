@@ -1,24 +1,26 @@
 import { LeadSchema } from "../types/lead";
 
+const daysFromNow = (days: number): string => new Date(Date.now() + days * 24 * 60 * 60 * 1_000).toISOString();
+
 export const seedLeads = LeadSchema.array().parse([
   {
     id: "strong",
     source: "manual",
-    receivedAt: "2026-10-12T12:00:00.000Z",
+    receivedAt: daysFromNow(-2),
     name: "Jordan Lee",
     email: "jordan@example.test",
     phone: "+1-555-0100",
     property: { address: "14 Oak Street", city: "Austin", propertyType: "House", askingPrice: 625000 },
     budget: { min: 600000, max: 650000, currency: "USD" },
-    timeline: { urgency: "WITHIN_30_DAYS", targetMoveDate: "2026-10-30T00:00:00.000Z" },
+    timeline: { urgency: "WITHIN_30_DAYS", targetMoveDate: daysFromNow(16) },
     message: "We are pre-approved and would like to tour 14 Oak Street this Saturday.",
-    engagement: { replyCount: 2, viewCount: 3, tourRequestCount: 1, lastActivityAt: "2026-10-12T11:00:00.000Z" },
+    engagement: { replyCount: 2, viewCount: 3, tourRequestCount: 1, lastActivityAt: daysFromNow(-2) },
     rawSourceData: { intakeId: "seed-1" },
   },
   {
     id: "weak",
     source: "csv",
-    receivedAt: "2026-10-11T12:00:00.000Z",
+    receivedAt: daysFromNow(-3),
     name: "Alex Morgan",
     email: "alex@example.test",
     property: {},
@@ -31,7 +33,7 @@ export const seedLeads = LeadSchema.array().parse([
   {
     id: "incomplete",
     source: "manual",
-    receivedAt: "2026-10-12T10:00:00.000Z",
+    receivedAt: daysFromNow(-2),
     name: "Taylor Reed",
     phone: "+1-555-0102",
     property: { city: "Austin" },
@@ -44,7 +46,7 @@ export const seedLeads = LeadSchema.array().parse([
   {
     id: "conflicting",
     source: "email-forward",
-    receivedAt: "2026-10-12T09:00:00.000Z",
+    receivedAt: daysFromNow(-2),
     name: "Avery Brooks",
     email: "avery@example.test",
     property: { address: "42 Cedar Street", city: "Austin", propertyType: "House", askingPrice: 625000 },
@@ -57,7 +59,7 @@ export const seedLeads = LeadSchema.array().parse([
   {
     id: "duplicate",
     source: "csv",
-    receivedAt: "2026-10-10T10:00:00.000Z",
+    receivedAt: daysFromNow(-4),
     name: "Jordan Lee",
     email: "jordan@example.test",
     property: { address: "14 Oak Street", city: "Austin", propertyType: "House", askingPrice: 625000 },
@@ -70,7 +72,7 @@ export const seedLeads = LeadSchema.array().parse([
   {
     id: "re-engaged",
     source: "email-forward",
-    receivedAt: "2026-10-12T08:00:00.000Z",
+    receivedAt: daysFromNow(-2),
     name: "Priya Nair",
     email: "priya@example.test",
     property: { city: "Austin", propertyType: "Townhouse" },
@@ -81,8 +83,8 @@ export const seedLeads = LeadSchema.array().parse([
       replyCount: 2,
       viewCount: 2,
       tourRequestCount: 1,
-      previousActivityAt: "2026-08-01T08:00:00.000Z",
-      lastActivityAt: "2026-10-12T07:55:00.000Z",
+      previousActivityAt: daysFromNow(-62),
+      lastActivityAt: daysFromNow(-1),
     },
     rawSourceData: {},
   },

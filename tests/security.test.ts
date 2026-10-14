@@ -37,6 +37,21 @@ describe("protected API route guard", () => {
     expect(finalResponse?.status).toBe(429);
     expect(finalResponse?.headers.get("retry-after")).toBeTruthy();
   });
+
+  it("keeps rate-limit buckets separate by client IP", () => {
+    const pathname = `/api/security-client-rate-${randomUUID()}`;
+    let blockedResponse: Response | undefined;
+    for (let index = 0; index < 21; index += 1) {
+      blockedResponse = guardProtectedRoute(new Request(`http://localhost${pathname}`, {
+        headers: { "x-real-ip": "192.0.2.10" },
+      }), "intake");
+    }
+    const otherClient = guardProtectedRoute(new Request(`http://localhost${pathname}`, {
+      headers: { "x-real-ip": "192.0.2.11" },
+    }), "intake");
+    expect(blockedResponse?.status).toBe(429);
+    expect(otherClient).toBeUndefined();
+  });
 });
 
 describe("Svix smoke signature", () => {

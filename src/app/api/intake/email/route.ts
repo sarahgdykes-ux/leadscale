@@ -7,6 +7,7 @@ export async function POST(request: Request): Promise<Response> {
     verify: verifyResendWebhook,
     getReceivedEmail: getResendReceivedEmail,
     repository: getLeadRepository(),
-    webhookSecretConfigured: Boolean(process.env.RESEND_WEBHOOK_SECRET),
+    webhookSecretConfigured: Boolean(process.env.RESEND_WEBHOOK_SECRET && process.env.RESEND_API_KEY),
+    allowedSenders: (process.env.EMAIL_FORWARD_ALLOWED_SENDERS ?? "").split(","),
   });
 }

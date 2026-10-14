@@ -1,0 +1,1 @@
+export const AGENT_PROMPT_VERSION = "1.0.0";

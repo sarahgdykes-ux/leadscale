@@ -85,6 +85,9 @@ export function createCsvAdapter(mapping: CsvHeaderMapping = DEFAULT_CSV_HEADER_
         field,
         index: normalizedHeaders.findIndex((header) => [headerKey(field), ...alternatives.map(headerKey)].includes(header)),
       }));
+      if (!canonicalHeaders.some((header) => header.index >= 0)) {
+        return { leads: [], errors: [{ row: 1, message: "CSV does not contain any recognized lead columns." }] };
+      }
       const leads: ParseResult["leads"] = [];
       const errors: ParseResult["errors"] = [];
 

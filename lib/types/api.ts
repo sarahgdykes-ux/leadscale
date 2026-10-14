@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { AGENT_PROMPT_VERSION, PrioritizeResultSchema } from "../agent/prioritize";
+import { PrioritizeResultSchema } from "../agent/prioritize";
 import { AssessmentSchema, LeadSchema } from "./lead";
+export { StatusApiResponseSchema } from "./status";
 
 export const ApiErrorResponseSchema = z.object({
   error: z.object({ code: z.string().min(1), message: z.string().min(1) }).strict(),
@@ -42,27 +43,18 @@ export const LegacyLeadDetailResponseSchema = z.object({
 }).strict();
 
 export const LeadListResponseSchema = LeadSchema.array();
+export const LeadDetailResponseSchema = z.object({
+  lead: LeadSchema,
+  assessment: AssessmentSchema.optional(),
+}).strict();
 export const PrioritizeApiResponseSchema = PrioritizeResultSchema;
 export const HealthApiResponseSchema = z.object({ status: z.literal("ok") }).strict();
 export const IntakeApiResponseSchema = z.object({
   imported: z.number().int().nonnegative(),
+  saved: z.number().int().nonnegative(),
+  merged: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
   errors: z.array(z.object({ row: z.number().int().positive().optional(), message: z.string().min(1) }).strict()),
-}).strict();
-
-export const StatusApiResponseSchema = z.object({
-  status: z.literal("ok"),
-  mode: z.enum(["mock", "live"]),
-  backend: z.enum(["memory", "supabase"]),
-  promptVersion: z.literal(AGENT_PROMPT_VERSION),
-  counts: z.object({
-    leads: z.number().int().nonnegative(),
-    scored: z.number().int().nonnegative(),
-    rejected: z.number().int().nonnegative(),
-    fallback: z.number().int().nonnegative(),
-    fallbackRate: z.number().min(0).max(1),
-    runs: z.number().int().nonnegative(),
-  }).strict(),
 }).strict();
 
 export const AssessmentApiSchema = AssessmentSchema;

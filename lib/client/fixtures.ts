@@ -44,9 +44,7 @@ export type PrioritizeResult = z.infer<typeof PrioritizeResultSchema>;
 export type RejectedLead = PrioritizeResult["rejected"][number];
 
 const timestamp = (daysAgo: number): string =>
-  new Date(
-    Date.parse("2026-10-14T12:00:00.000Z") - daysAgo * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
 
 type FixtureInput = {
   id: string;
@@ -71,10 +69,19 @@ type FixtureInput = {
   contact?: { email?: string; phone?: string };
 };
 
+const fixtureSourceByChannel: Record<string, Lead["source"]> = {
+  "Website inquiry": "manual",
+  Referral: "manual",
+  "Open house": "manual",
+  "Property portal": "csv",
+  "Agent referral": "manual",
+  "Email inquiry": "email-forward",
+};
+
 function makeLead(input: FixtureInput): Lead {
   return LeadSchema.parse({
     id: input.id,
-    source: input.source,
+    source: fixtureSourceByChannel[input.source] ?? "manual",
     receivedAt: timestamp(input.receivedDaysAgo),
     name: input.name,
     email: input.contact?.email ?? `${input.id}@example.com`,

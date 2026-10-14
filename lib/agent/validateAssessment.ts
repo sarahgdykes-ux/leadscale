@@ -13,16 +13,24 @@ export const ASSESSMENT_GOVERNANCE_CONFIG = {
 } as const;
 
 export const FAIR_HOUSING_DENYLIST = [
-  "race",
   "religion",
   "national origin",
   "disability",
   "familial status",
-    "family status",
+  "family status",
   "marital status",
   "sexual orientation",
   "gender identity",
 ] as const;
+
+const FAIR_HOUSING_PATTERNS = [
+  /\brace\b(?!\s+to\s+close\b)/i,
+  ...FAIR_HOUSING_DENYLIST.map((term) => new RegExp(`(^|[^a-z])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z]|$)`, "i")),
+  /\b(?:attend(?:s|ed|ing)?|go(?:es|ing)? to|member of|worship(?:s|ed|ing)? at|active in)\s+(?:a\s+)?(?:church|mosque|synagogue|temple)\b/i,
+  /\b(?:churchgoer|mosque-goer|synagogue-goer|temple-goer)\b/i,
+  /\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:kids|children|sons|daughters)\b/i,
+  /\b(?:elderly|senior citizen|older couple|young couple|age\s+\d{2,3})\b/i,
+];
 
 export class AssessmentValidationError extends Error {
   constructor(message: string) {
@@ -57,19 +65,14 @@ function assertSafeText(assessment: Assessment): void {
     assessment.recommendedAction,
     ...assessment.missingInformation,
   ].join("\n");
-  const normalized = text.toLowerCase();
-
-  for (const term of FAIR_HOUSING_DENYLIST) {
-    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(^|[^a-z])${escapedTerm}([^a-z]|$)`, "i").test(normalized)) {
-      throw new AssessmentValidationError("Assessment contains a disallowed fair-housing inference term.");
-    }
+  if (FAIR_HOUSING_PATTERNS.some((pattern) => pattern.test(text))) {
+    throw new AssessmentValidationError("Assessment contains a disallowed fair-housing inference or proxy.");
   }
 
   const injectionPatterns = [
     /\b(?:ignore|disregard|override)\s+(?:all\s+)?(?:previous|prior|system|developer)\s+instructions\b/i,
     /\b(?:rate|mark)\s+(?:this\s+)?(?:lead\s+)?(?:as\s+)?urgent\b/i,
-    /\bscore\s+(?:of\s+)?100\b/i,
+    /\b(?:give|assign|set|mark)\s+(?:this\s+)?(?:lead\s+)?(?:a\s+)?score\s+(?:of\s+)?100\b/i,
     /\b(?:follow|obey)\s+(?:the|these)\s+instructions\b/i,
   ];
   if (injectionPatterns.some((pattern) => pattern.test(text))) {

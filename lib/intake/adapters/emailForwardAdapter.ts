@@ -56,13 +56,14 @@ function extractPipeField(text: string, label: string): string | undefined {
 }
 
 function genericParser(input: EmailInput, text: string): Record<string, unknown> {
-  const email = text.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0];
-  const phone = text.match(/(?:\+?\d[\d ().-]{6,}\d)/)?.[0];
+  const email = extractLabel(text, "contact email|buyer email|lead email|e-?mail");
+  const usableEmail = email && !/(?:no.?reply|do.?not.?reply|mailer-daemon|postmaster)@/i.test(email)
+    ? email
+    : undefined;
   return {
-    id: input.providerEmailId,
-    name: extractLabel(text, "name|contact|buyer|lead") ?? (email ? email.split("@")[0] : undefined),
-    email: extractLabel(text, "email|e-mail") ?? email,
-    phone: extractLabel(text, "phone|mobile|tel") ?? phone,
+    name: extractLabel(text, "contact name|buyer name|lead name|name"),
+    email: usableEmail,
+    phone: extractLabel(text, "buyer phone(?: number)?|contact phone(?: number)?|lead phone(?: number)?|phone(?: number)?|mobile|tel"),
     address: extractLabel(text, "property address|address|listing"),
     city: extractLabel(text, "city"),
     propertyType: extractLabel(text, "property type|home type"),

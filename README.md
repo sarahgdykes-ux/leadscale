@@ -3,7 +3,7 @@ Lead scaling and scoring tool
 
 ## Shared setup
 
-This repository is the shared foundation for the 2-day Real Estate Lead Prioritization Agent MVP. It contains the typed lead contract, deterministic mock endpoints, seed data, and integration boundaries; it does not contain the production agent, UI, or source integrations.
+This repository contains the Leadscale lead desk, frozen lead and assessment contracts, deterministic scoring, the Strands-backed live-agent adapter, CSV/manual/email intake, and memory/Supabase repository implementations. External live-service behavior still requires deployment configuration and verification.
 
 ### Start locally
 
@@ -30,7 +30,7 @@ npm install @strands-agents/harness@0.2.0 @strands-agents/sdk@1.20.0 zod@^4.1.12
 npm install -D tsx
 ```
 
-The current npm registry lists Strands Harness `0.2.0` and SDK `1.20.0`. Harness' published README documents `createHarness()` and requires the SDK as a peer. This scaffold does not call it; see `docs/CONTRACT.md` before wiring the real agent. Node.js 22+ is required by the Strands SDK.
+The server agent constructs a Strands Harness with one isolated instance per lead invocation. Node.js 22+ is required by the Strands SDK. Live Strands, Supabase, and Resend behavior must be verified with configured services before production rollout.
 
 ### Branches and protection
 
@@ -62,7 +62,7 @@ npm run seed
 - `POST /api/intake/manual`: one lead object, an array of objects, or `{ "leads": [...] }` as JSON.
 - `POST /api/intake/email`: Resend `email.received` webhook. Configure its signing secret and `RESEND_API_KEY`; the webhook event's `data.email_id` is used to retrieve the inbound body.
 
-Partial imports return `{ "imported": 1, "skipped": 1, "errors": [{ "row": 3, "message": "..." }] }`. Request-level failures return `{ "error": { "code": "...", "message": "..." } }`.
+Partial imports return saved, merged, and skipped counts, for example `{ "imported": 1, "saved": 1, "merged": 0, "skipped": 1, "errors": [{ "row": 3, "message": "..." }] }`. Request-level failures return `{ "error": { "code": "...", "message": "..." }`.
 
 #### Integration notes for Shalinthia
 

@@ -31,7 +31,9 @@ export async function POST(request: Request): Promise<Response> {
       const form = await formRequest.formData();
       const upload = form.get("file") ?? form.get("csv");
       if (typeof upload === "string") csv = upload;
-      else if (upload instanceof File && upload.size <= INTAKE_LIMITS.maxRequestBytes) csv = await upload.text();
+      else if (upload instanceof File && upload.size > INTAKE_LIMITS.maxRequestBytes) {
+        return intakeError("PAYLOAD_TOO_LARGE", "CSV exceeds the configured size limit.", 413);
+      } else if (upload instanceof File) csv = await upload.text();
       else return intakeError("INVALID_REQUEST", "A CSV file is required.", 400);
     } else {
       const decoded = decodeRequestText(body);
@@ -47,8 +49,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = await csvAdapter.parse(csv);
   try {
-    await getLeadRepository().saveLeads(parsed.leads);
-    return Response.json({ imported: parsed.leads.length, skipped: parsed.errors.length, errors: parsed.errors });
+    const saved = await getLeadRepository().saveLeads(parsed.leads);
+    return Response.json({
+      imported: saved.saved + saved.merged,
+      saved: saved.saved,
+      merged: saved.merged,
+      skipped: saved.skipped + parsed.errors.length,
+      errors: parsed.errors,
+    });
   } catch {
     return intakeError("INTAKE_FAILED", "CSV leads could not be saved.", 500);
   }

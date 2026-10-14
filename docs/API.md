@@ -2,7 +2,7 @@
 
 All routes are same-origin only for browser requests. Routes that return lead data or mutate it require `ROUTE_SHARED_SECRET` in production, sent as `x-api-key` by a trusted server caller. Do not put this secret in a browser bundle. Webhook routes use Resend signatures instead. Cross-origin requests are rejected; no permissive CORS headers are emitted.
 
-All new request handlers return JSON. Errors use `{ "error": { "code": "...", "message": "..." } }`, except the pre-existing legacy lead-detail route, which retains `{ "error": "..." }`.
+All request handlers return JSON. Errors use `{ "error": { "code": "...", "message": "..." } }`.
 
 ## Health and Status
 
@@ -43,9 +43,9 @@ Errors: `500 STATUS_UNAVAILABLE`.
 
 ## Lead Data
 
-### `GET /api/leads`
+### `GET /api/leads?offset=0&limit=12`
 
-Requires the shared route credential in production. Response `200` is an array of frozen `Lead` objects from `lib/types/lead.ts`. It sends `Cache-Control: no-store`.
+Requires the shared route credential in production. Response `200` is an array of at most 12 frozen `Lead` objects from `lib/types/lead.ts`; `x-total-count`, `x-page-offset`, and `x-page-limit` describe the page. Raw intake payloads are omitted. It sends `Cache-Control: no-store`.
 
 Errors: `401 UNAUTHORIZED`, `403 INVALID_ORIGIN`, `429 RATE_LIMITED`, `500 LEADS_UNAVAILABLE`.
 
@@ -53,9 +53,9 @@ Mock-only UI states can be requested with `?simulate=empty|error|slow`. `empty` 
 
 ### `GET /api/leads/{id}`
 
-Requires the shared route credential in production. This pre-existing endpoint returns the legacy flattened `src/contracts/lead.ts` detail shape; it is intentionally not rewritten as part of the frozen-contract work.
+Requires the shared route credential in production. Returns `{ "lead": Lead, "assessment"?: Assessment }` from the active repository. Raw intake payloads are omitted; an assessment is present only after prioritization.
 
-Errors retain the legacy shape: `400 { "error": "Invalid lead id." }` or `404 { "error": "Lead not found." }`.
+Errors: `400 INVALID_REQUEST`, `401 UNAUTHORIZED`, `403 INVALID_ORIGIN`, `404 LEAD_NOT_FOUND`, `429 RATE_LIMITED`, `500 LEAD_UNAVAILABLE`.
 
 ## Prioritization
 
@@ -116,7 +116,7 @@ Requires the shared route credential in production. Accepts a lead-shaped object
 
 ### `POST /api/intake/email`
 
-Resend `email.received` webhook only; requires a valid Svix signature. Resend's event carries `data.email_id`; the server retrieves the inbound body from Resend. A repeated provider email ID returns a successful no-op.
+Resend `email.received` webhook only; requires a valid Svix signature, an allowlisted forwarding sender, and passing SPF or DKIM results from the fetched Resend message. Resend's event carries `data.email_id`; the server retrieves the inbound body from Resend and does not persist the full message in raw metadata. A repeated provider email ID returns a successful no-op.
 
 Verified event request example (the three `svix-*` headers are required):
 
@@ -133,10 +133,10 @@ Verified event request example (the three `svix-*` headers are required):
 }
 ```
 
-All intake routes return the same partial-success structure:
+All intake routes return the same partial-success structure. `imported` remains the total saved plus merged count for compatibility; the separate fields report actual persistence outcomes:
 
 ```json
-{ "imported": 1, "skipped": 1, "errors": [{ "row": 3, "message": "email: Invalid email address" }] }
+{ "imported": 1, "saved": 1, "merged": 0, "skipped": 1, "errors": [{ "row": 3, "message": "email: Invalid email address" }] }
 ```
 
 Errors: `400 INVALID_REQUEST`/`INVALID_JSON`/`INVALID_SIGNATURE`, `401 UNSIGNED_WEBHOOK`/`INVALID_SIGNATURE`/`UNAUTHORIZED`, `403 INVALID_ORIGIN`, `413 PAYLOAD_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`, `429 RATE_LIMITED`, `500 INTAKE_FAILED`/`EMAIL_INTAKE_FAILED`, `503 WEBHOOK_NOT_CONFIGURED`.

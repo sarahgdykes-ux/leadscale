@@ -1,8 +1,11 @@
 import { seedLeads } from "./seedLeads";
 import { AssessmentSchema, LeadSchema, type Assessment, type Lead } from "../types/lead";
 import { leadDedupeKey } from "./leadHash";
+import { INTAKE_LIMITS } from "../intake/config";
 
 export type AssessmentSource = "agent" | "fallback";
+
+export type LeadSaveResult = { saved: number; merged: number; skipped: number };
 
 export type AssessmentToSave = {
   leadId: string;
@@ -49,7 +52,7 @@ export type OperationalCounts = {
 export interface LeadRepository {
   getById(id: string): Promise<Lead | null>;
   list(): Promise<Lead[]>;
-  saveLeads(leads: readonly Lead[]): Promise<void>;
+  saveLeads(leads: readonly Lead[]): Promise<LeadSaveResult>;
   saveAssessments(assessments: readonly AssessmentToSave[]): Promise<void>;
   saveRejected(leads: readonly RejectedLeadToSave[]): Promise<void>;
   getLatestAssessments(leadIds: readonly string[]): Promise<Record<string, StoredAssessment>>;
@@ -63,11 +66,11 @@ export interface LeadRepository {
 export class InMemoryLeadRepository implements LeadRepository {
   private readonly leads: Lead[];
   private readonly assessments = new Map<string, StoredAssessment>();
-  private readonly intakeEvents = new Map<string, { source: string; status: IntakeEventStatus; error?: string }>();
+  private readonly intakeEvents = new Map<string, { source: string; status: IntakeEventStatus; error?: string; updatedAt: number }>();
   private readonly rejected: RejectedLeadToSave[] = [];
   private readonly runs: PrioritizeRunSummary[] = [];
 
-  constructor(leads: readonly unknown[] = seedLeads) {
+  constructor(leads: readonly unknown[] = seedLeads, private readonly now: () => Date = () => new Date()) {
     this.leads = leads.map((lead) => LeadSchema.parse(lead));
   }
 
@@ -80,20 +83,21 @@ export class InMemoryLeadRepository implements LeadRepository {
     return this.leads.map((lead) => LeadSchema.parse(lead));
   }
 
-  async saveLeads(leads: readonly Lead[]): Promise<void> {
+  async saveLeads(leads: readonly Lead[]): Promise<LeadSaveResult> {
+    const result: LeadSaveResult = { saved: 0, merged: 0, skipped: 0 };
     for (const candidate of leads) {
       const lead = LeadSchema.parse(candidate);
       const key = leadDedupeKey(lead);
       const existingIndex = this.leads.findIndex((saved) => leadDedupeKey(saved) === key);
       if (existingIndex < 0) {
         this.leads.push(lead);
+        result.saved += 1;
         continue;
       }
-      const existing = this.leads[existingIndex]!;
-      if (Date.parse(lead.receivedAt) > Date.parse(existing.receivedAt)) {
-        this.leads[existingIndex] = LeadSchema.parse({ ...lead, id: existing.id });
-      }
+      this.leads[existingIndex] = lead;
+      result.merged += 1;
     }
+    return result;
   }
 
   async saveAssessments(assessments: readonly AssessmentToSave[]): Promise<void> {
@@ -117,16 +121,25 @@ export class InMemoryLeadRepository implements LeadRepository {
   }
 
   async claimIntakeEvent(providerMessageId: string, source: string): Promise<boolean> {
+    const now = this.now().getTime();
     const existing = this.intakeEvents.get(providerMessageId);
-    if (existing && existing.status !== "failed") return false;
-    this.intakeEvents.set(providerMessageId, { source, status: "pending" });
+    const retryable = existing?.status === "failed" || (
+      existing?.status === "pending" && now - existing.updatedAt >= INTAKE_LIMITS.pendingEventLeaseMs
+    );
+    if (existing && !retryable) return false;
+    this.intakeEvents.set(providerMessageId, { source, status: "pending", updatedAt: now });
     return true;
   }
 
   async finishIntakeEvent(providerMessageId: string, status: IntakeEventStatus, error?: string): Promise<void> {
     const event = this.intakeEvents.get(providerMessageId);
     if (!event) return;
-    this.intakeEvents.set(providerMessageId, { ...event, status, ...(error ? { error } : {}) });
+    this.intakeEvents.set(providerMessageId, {
+      ...event,
+      status,
+      updatedAt: this.now().getTime(),
+      ...(error ? { error } : {}),
+    });
   }
 
   async savePrioritizeRun(summary: PrioritizeRunSummary): Promise<void> {

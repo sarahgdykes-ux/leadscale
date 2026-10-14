@@ -1,6 +1,6 @@
 import { getLeadRepository } from "../../../../lib/data";
 import { AGENT_PROMPT_VERSION } from "../../../../lib/agent/prioritize";
-import { StatusApiResponseSchema } from "../../../../lib/types/api";
+import { StatusApiResponseSchema } from "../../../../lib/types/status";
 
 export async function GET(): Promise<Response> {
   try {

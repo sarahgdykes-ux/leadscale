@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const LeadSourceSchema = z.string().trim().min(1);
+export const LeadSourceSchema = z.enum(["csv", "email-forward", "manual"]);
 
 export const PropertySchema = z
   .object({

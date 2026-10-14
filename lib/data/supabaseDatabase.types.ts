@@ -67,6 +67,7 @@ type IntakeEventRow = {
   status: "pending" | "processed" | "rejected" | "failed";
   error: string | null;
   created_at: string;
+  updated_at: string;
 };
 
 export interface Database {

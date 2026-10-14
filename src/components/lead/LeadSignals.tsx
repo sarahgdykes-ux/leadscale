@@ -1,5 +1,5 @@
 import type { Priority } from "../../../lib/types/lead";
-import { Badge, Tooltip } from "../ui/primitives";
+import { Badge, Tooltip, VisuallyHidden } from "../ui/primitives";
 
 const priorityLabels: Record<Priority, string> = {
   LOW: "Low",
@@ -12,7 +12,6 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   return (
     <span
       className={`priority-badge priority-badge--${priority.toLowerCase()}`}
-      aria-label={`Priority: ${priorityLabels[priority]}`}
     >
       <span className="priority-mark" aria-hidden="true" />
       <span>{priorityLabels[priority]}</span>
@@ -22,11 +21,12 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
 
 export function ScoreMark({ score }: { score: number }) {
   return (
-    <span className="score-mark" aria-label={`Lead score ${score} out of 100`}>
-      <span>{score}</span>
-      <span className="score-denominator" aria-hidden="true">
-        /100
+    <span className="score-mark">
+      <span aria-hidden="true">
+        <span>{score}</span>
+        <span className="score-denominator">/100</span>
       </span>
+      <VisuallyHidden>Score {score} out of 100</VisuallyHidden>
     </span>
   );
 }

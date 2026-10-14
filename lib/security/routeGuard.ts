@@ -13,7 +13,9 @@ function rateLimitStore(): RateLimitStore {
 
 function rateLimit(request: Request, scope: "intake" | "prioritize"): Response | undefined {
   const now = Date.now();
-  const key = `${new URL(request.url).pathname}:${scope}`;
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const clientIp = request.headers.get("x-real-ip")?.trim() || forwardedFor || "unknown-client";
+  const key = `${new URL(request.url).pathname}:${scope}:${clientIp}`;
   const store = rateLimitStore();
   const entry = store.get(key);
   const maxRequests = scope === "prioritize"

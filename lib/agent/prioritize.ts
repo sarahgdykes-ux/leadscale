@@ -10,11 +10,12 @@ import { deriveMissingInformation, scoreLead } from "./scoring";
 import { buildFallbackAssessment } from "./fallback";
 import { runLeadAgent, type AgentInput, type ModelRunner } from "./agent";
 import { validateAndConstrain } from "./validateAssessment";
+import { AGENT_PROMPT_VERSION } from "./promptVersion";
 
-export const AGENT_PROMPT_VERSION = "1.0.0";
+export { AGENT_PROMPT_VERSION };
 
 export const PRIORITIZE_CONFIG = {
-  defaultTimeoutMs: 15000,
+  defaultTimeoutMs: 10000,
   defaultConcurrency: 3,
   retries: 1,
 } as const;

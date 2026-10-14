@@ -17,18 +17,14 @@ const SanitizedLeadSchema = z.object({
   id: z.string().trim().min(1),
   source: LeadSourceSchema,
   receivedAt: z.string().datetime({ offset: true }),
-  name: z.string().trim().min(1),
-  email: z.string().trim().email().optional(),
-  phone: z.string().trim().min(1).optional(),
+  hasEmail: z.boolean(),
+  hasPhone: z.boolean(),
   property: PropertySchema,
   budget: BudgetSchema,
   timeline: TimelineSchema,
   message: z.string(),
   engagement: EngagementSchema,
-}).strict().refine((lead) => Boolean(lead.email || lead.phone), {
-  message: "A lead must include an email address or phone number.",
-  path: ["email"],
-});
+}).strict();
 const ScoreFactorSchema = z.object({ factor: z.string(), points: z.number(), note: z.string() }).strict();
 
 export const GetLeadOutputSchema = z.discriminatedUnion("status", [
@@ -48,6 +44,7 @@ export const GET_LEAD_DEFAULT_MAX_CHARS = 4000;
 
 export type GetLeadToolOptions = {
   repository: LeadRepository;
+  allowedLeadId?: string;
   maxMessageChars?: number;
   now?: () => string;
 };
@@ -58,11 +55,10 @@ function positiveLimit(value: number | undefined): number {
     : GET_LEAD_DEFAULT_MAX_CHARS;
 }
 
-function wrapMessage(message: string, maxChars: number): string {
-  const safeMessage = message
-    .replace(/<\/?lead_message\s*>/gi, "[lead-message tag]")
-    .slice(0, maxChars);
-  return `<lead_message>${safeMessage}</lead_message>`;
+function wrapUntrusted(value: string | undefined, tag: string, maxChars = Number.POSITIVE_INFINITY): string | undefined {
+  if (value === undefined) return undefined;
+  const safeValue = value.replace(new RegExp(`<\\/?${tag}\\s*>`, "gi"), `[${tag} tag]`).slice(0, maxChars);
+  return `<${tag}>${safeValue}</${tag}>`;
 }
 
 /** The Strands agent calls this read-only tool to retrieve one lead for assessment. */
@@ -74,6 +70,9 @@ export function createGetLeadTool(options: GetLeadToolOptions) {
     description: "Retrieve one lead by id, with its filter flags and deterministic score breakdown.",
     inputSchema: GetLeadInputSchema,
     callback: async ({ leadId }) => {
+      if (options.allowedLeadId !== undefined && leadId !== options.allowedLeadId) {
+        return GetLeadOutputSchema.parse({ status: "not_found", leadId });
+      }
       const lead = await options.repository.getById(leadId);
       if (!lead) return GetLeadOutputSchema.parse({ status: "not_found", leadId });
 
@@ -90,10 +89,14 @@ export function createGetLeadTool(options: GetLeadToolOptions) {
         id: lead.id,
         source: lead.source,
         receivedAt: lead.receivedAt,
-        name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        property: lead.property,
+        hasEmail: Boolean(lead.email),
+        hasPhone: Boolean(lead.phone),
+        property: {
+          ...lead.property,
+          ...(lead.property.address ? { address: wrapUntrusted(lead.property.address, "lead_address") } : {}),
+          ...(lead.property.city ? { city: wrapUntrusted(lead.property.city, "lead_city") } : {}),
+          ...(lead.property.propertyType ? { propertyType: wrapUntrusted(lead.property.propertyType, "lead_property_type") } : {}),
+        },
         budget: lead.budget,
         timeline: lead.timeline,
         message: lead.message,
@@ -101,7 +104,7 @@ export function createGetLeadTool(options: GetLeadToolOptions) {
       };
       const output = {
         status: "found" as const,
-        lead: { ...safeLead, message: wrapMessage(lead.message, maxMessageChars) },
+        lead: { ...safeLead, message: wrapUntrusted(lead.message, "lead_message", maxMessageChars) ?? "<lead_message></lead_message>" },
         flags,
         preScore: scoring.score,
         breakdown: scoring.breakdown,

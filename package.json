@@ -2,6 +2,7 @@
   "name": "real-estate-lead-agent",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@10.9.4",
   "engines": {
     "node": ">=22"
   },
@@ -11,7 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/contract.test.ts && vitest run tests/contract/api.test.ts tests/security.test.ts tests/agent-runtime.test.ts tests/lead-prioritization.test.ts tests/intake-normalize.test.ts tests/intake.test.ts",
+    "test": "vitest run",
     "test:lead-prioritization": "vitest run tests/lead-prioritization.test.ts",
     "seed": "tsx scripts/seed.ts",
     "eval": "tsx scripts/eval.ts",
