@@ -1395,6 +1395,10 @@ p {
   color: var(--ink);
   font: inherit;
 }
+.property-filter-fields input:focus-visible {
+  outline: 3px solid #8a452d;
+  outline-offset: 3px;
+}
 .price-input-wrap {
   position: relative;
   display: flex;
