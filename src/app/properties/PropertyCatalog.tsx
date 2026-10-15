@@ -135,7 +135,7 @@ export default function PropertiesPage() {
       <section className="property-results" aria-labelledby="results-heading">
         <div className="property-results-heading">
           <div>
-            <p className="eyebrow">AUSTIN & NEARBY</p>
+            <p className="eyebrow">FICTIONAL HOMES ACROSS FOUR CITIES</p>
             <h2 id="results-heading">Homes to explore</h2>
           </div>
           <p aria-live="polite">

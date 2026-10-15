@@ -1304,6 +1304,88 @@ p {
 .lead-contact-actions a {
   text-decoration: none;
 }
+.property-recommendation-section {
+  margin-top: var(--space-4);
+}
+.property-recommendations {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: #f8f5ee;
+}
+.property-recommendations > h3 {
+  margin: var(--space-1) 0 var(--space-3);
+  font-family: var(--font-display), Georgia, serif;
+  font-size: var(--type-section);
+  font-weight: 500;
+}
+.recommendation-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.recommendation-card {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.34fr) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+}
+.recommendation-artwork {
+  min-height: 100%;
+}
+.recommendation-card-content {
+  min-width: 0;
+  padding: var(--space-3);
+}
+.recommendation-price {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.recommendation-card-content h4 {
+  margin: var(--space-1) 0 0;
+  font-size: var(--type-body);
+  overflow-wrap: anywhere;
+}
+.recommendation-location {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+.recommendation-reasons {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+.recommendation-link {
+  color: var(--accent-dark);
+  font-size: var(--type-label);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+.recommendation-empty {
+  padding: var(--space-3);
+  border-left: 2px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+.recommendation-empty p {
+  margin: 0 0 var(--space-2);
+}
+.recommendation-disclaimer {
+  margin: var(--space-3) 0 0;
+  color: var(--soft-muted);
+  font-size: var(--type-label);
+}
 .detail-facts a {
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
@@ -1848,6 +1930,12 @@ p {
   }
   .follow-up-fields {
     grid-template-columns: 1fr;
+  }
+  .recommendation-card {
+    grid-template-columns: 1fr;
+  }
+  .recommendation-artwork {
+    min-height: 140px;
   }
   .detail-actions {
     align-items: stretch;

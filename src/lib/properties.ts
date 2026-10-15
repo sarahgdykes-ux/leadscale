@@ -1,3 +1,5 @@
+import type { Lead } from "../../lib/types/lead";
+
 export const PROPERTY_TYPES = [
   "House",
   "Townhouse",
@@ -24,6 +26,21 @@ export type PropertyListing = {
 };
 
 export const propertyListings: PropertyListing[] = [
+  {
+    id: "juniper-court-condo",
+    address: "76 Juniper Court, Unit 8A",
+    city: "Brooklyn",
+    propertyType: "Condo",
+    price: 975000,
+    bedrooms: 2,
+    bathrooms: 2,
+    squareFeet: 1320,
+    yearBuilt: 2021,
+    description:
+      "A bright corner residence with a broad living room, a quiet work nook, and a private balcony.",
+    features: ["Private balcony", "Corner windows", "Dedicated work nook"],
+    style: "condo",
+  },
   {
     id: "wren-house",
     address: "108 Wren House Lane",
@@ -182,4 +199,123 @@ export function filterProperties(
 
 export function getPropertyById(id: string): PropertyListing | undefined {
   return propertyListings.find((property) => property.id === id);
+}
+
+export type PropertyRecommendation = {
+  property: PropertyListing;
+  reasons: string[];
+};
+
+function normalizePreference(value: string): string {
+  return value.trim().toLowerCase().replaceAll(/[^a-z0-9]+/g, " ");
+}
+
+function propertyTypeMatches(
+  requestedType: string,
+  listingType: PropertyType,
+): boolean {
+  const requested = normalizePreference(requestedType);
+  const aliases: Record<PropertyType, string[]> = {
+    House: [
+      "house",
+      "home",
+      "single family",
+      "singlefamily",
+      "bungalow",
+      "brownstone",
+    ],
+    Townhouse: ["townhouse", "town home", "townhome", "row house", "rowhome"],
+    Condo: ["condo", "condominium", "apartment", "co op", "coop"],
+    Cottage: ["cottage"],
+  };
+  return aliases[listingType].some(
+    (alias) =>
+      requested === alias ||
+      requested.startsWith(`${alias} `) ||
+      requested.endsWith(` ${alias}`) ||
+      requested.includes(` ${alias} `),
+  );
+}
+
+function cityMatches(requestedCity: string, listingCity: string): boolean {
+  const requested = normalizePreference(requestedCity);
+  const listing = normalizePreference(listingCity);
+  return (
+    requested === listing ||
+    requested.startsWith(`${listing} `) ||
+    requested.endsWith(` ${listing}`)
+  );
+}
+
+export function recommendProperties(
+  lead: Lead,
+  properties: readonly PropertyListing[] = propertyListings,
+): PropertyRecommendation[] {
+  if (lead.budget.currency !== "USD") return [];
+
+  const requestedCity = lead.property.city;
+  const requestedType = lead.property.propertyType;
+  const hasBudgetRange =
+    lead.budget.min !== undefined || lead.budget.max !== undefined;
+  if (!requestedCity && !requestedType && !hasBudgetRange) return [];
+
+  const matching = properties
+    .filter((property) => {
+      if (requestedCity && !cityMatches(requestedCity, property.city)) {
+        return false;
+      }
+      if (
+        requestedType &&
+        !propertyTypeMatches(requestedType, property.propertyType)
+      ) {
+        return false;
+      }
+      if (lead.budget.min !== undefined && property.price < lead.budget.min) {
+        return false;
+      }
+      if (lead.budget.max !== undefined && property.price > lead.budget.max) {
+        return false;
+      }
+      return true;
+    })
+    .map((property) => {
+      const reasons: string[] = [];
+      if (requestedCity) {
+        reasons.push(`In ${property.city}, matching the preferred area.`);
+      }
+      if (requestedType) {
+        reasons.push(
+          `Listed as a ${property.propertyType}, matching the requested type.`,
+        );
+      }
+      if (hasBudgetRange) {
+        const formatPrice = (price: number) =>
+          new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: lead.budget.currency,
+            maximumFractionDigits: 0,
+          }).format(price);
+        const budgetDescription =
+          lead.budget.min !== undefined && lead.budget.max !== undefined
+            ? `budget of ${formatPrice(lead.budget.min)}–${formatPrice(lead.budget.max)}`
+            : lead.budget.max !== undefined
+              ? `budget up to ${formatPrice(lead.budget.max)}`
+              : `budget starting at ${formatPrice(lead.budget.min ?? 0)}`;
+        reasons.push(
+          `Price fits the stated ${budgetDescription}.`,
+        );
+      }
+      return { property, reasons };
+    });
+
+  if (lead.budget.min !== undefined && lead.budget.max !== undefined) {
+    const midpoint = (lead.budget.min + lead.budget.max) / 2;
+    matching.sort(
+      (left, right) =>
+        Math.abs(left.property.price - midpoint) -
+        Math.abs(right.property.price - midpoint),
+    );
+  }
+
+  return matching.slice(0, 3);
 }

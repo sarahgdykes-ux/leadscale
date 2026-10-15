@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import type { Priority } from "../../lib/types/lead";
 import {
   Button,
@@ -19,6 +20,7 @@ import {
   SourceTag,
 } from "@/components/lead/LeadSignals";
 import { LeadContactActions } from "@/components/lead/LeadContactActions";
+import { PropertyArtwork } from "@/components/property/PropertyArtwork";
 import { useLeadDesk, type DeskLead } from "@/hooks/useLeadDesk";
 import {
   FOLLOW_UP_STATUS_LABELS,
@@ -29,6 +31,7 @@ import {
   type FollowUpRecord,
   type FollowUpStatus,
 } from "@/lib/followUp";
+import { recommendProperties } from "@/lib/properties";
 
 type PriorityFilter = "ALL" | Priority;
 type SortOrder = "score" | "recent";
@@ -210,6 +213,8 @@ function LeadDetail({
   onFollowUpChange: (update: Partial<FollowUpRecord>) => void;
 }) {
   const [copyFeedback, setCopyFeedback] = useState("");
+  const [showRecommendations, setShowRecommendations] = useState(false);
+  const recommendations = recommendProperties(lead.lead);
   const contact = [lead.lead.email, lead.lead.phone].filter(Boolean).join(" · ");
   const copy = async (text: string, label: string) => {
     try {
@@ -252,6 +257,78 @@ function LeadDetail({
         email={lead.lead.email}
         phone={lead.lead.phone}
       />
+      <section className="property-recommendation-section">
+        <Button
+          size="small"
+          variant="primary"
+          aria-expanded={showRecommendations}
+          aria-controls="lead-property-recommendations"
+          onClick={() => setShowRecommendations((show) => !show)}
+        >
+          {showRecommendations ? "Hide property matches" : "Recommend properties"}
+        </Button>
+        {showRecommendations ? (
+          <div
+            className="property-recommendations"
+            id="lead-property-recommendations"
+            aria-live="polite"
+          >
+            <p className="eyebrow">MOCK PROPERTY MATCHES</p>
+            <h3>Homes that fit {lead.lead.name}&apos;s needs</h3>
+            {recommendations.length ? (
+              <ul className="recommendation-list">
+                {recommendations.map(({ property, reasons }) => (
+                  <li className="recommendation-card" key={property.id}>
+                    <PropertyArtwork
+                      style={property.style}
+                      className="recommendation-artwork"
+                    />
+                    <div className="recommendation-card-content">
+                      <p className="recommendation-price">
+                        {new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: lead.lead.budget.currency,
+                          maximumFractionDigits: 0,
+                        }).format(property.price)}
+                      </p>
+                      <h4>{property.address}</h4>
+                      <p className="recommendation-location">
+                        {property.city} · {property.propertyType} ·{" "}
+                        {property.bedrooms} beds · {property.bathrooms} baths
+                      </p>
+                      <ul className="recommendation-reasons">
+                        {reasons.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                      <Link
+                        className="recommendation-link"
+                        href={`/properties/${property.id}`}
+                      >
+                        View property details <span aria-hidden="true">↗</span>
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="recommendation-empty">
+                <p>
+                  No sample properties match all the location, type, and budget
+                  details currently available for this lead.
+                </p>
+                <Link className="recommendation-link" href="/properties">
+                  Browse the full mock catalog <span aria-hidden="true">↗</span>
+                </Link>
+              </div>
+            )}
+            <p className="recommendation-disclaimer">
+              Demo recommendations use only stated lead details and fictional
+              catalog listings.
+            </p>
+          </div>
+        ) : null}
+      </section>
       <section className="detail-section follow-up-section" aria-labelledby="follow-up-title">
         <h3 id="follow-up-title">Follow-up plan</h3>
         <p className="follow-up-help">
