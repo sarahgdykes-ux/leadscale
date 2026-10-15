@@ -28,6 +28,7 @@ The current DB repository merges duplicate contacts during intake based on norma
 - Partial failure: import one valid and one invalid row and show `imported`, `skipped`, and row messages.
 - Fallback: `POST /api/prioritize?simulate=fallback` produces `meta[].source = "fallback"` in mock mode.
 - Follow-up workflow: open a lead, choose New, Contacted, Tour scheduled, Nurture, or Handled, then set a date. Use **Show due now** to view overdue and today's active follow-ups. Plans are saved only in that browser's local storage; this demo does not send messages or write follow-up data to the API/database.
+- Property catalog: visit `/properties` to browse the fictional sample listings, filter by city, type, or price, and open a listing for its details. Listings are demo content only and are separate from lead records.
 
 The simulation switches above are API-only; use curl or the browser Network panel. They are disabled unless `AGENT_MODE=mock`.
 

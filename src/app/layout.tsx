@@ -40,6 +40,9 @@ export default function RootLayout({
               <span className="brand-name">Leadscale</span>
             </Link>
             <div className="header-right">
+              <Link className="properties-link" href="/properties">
+                Properties
+              </Link>
               <ServiceStatus />
               {process.env.NODE_ENV !== "production" ? (
                 <Link className="design-link" href="/design">
