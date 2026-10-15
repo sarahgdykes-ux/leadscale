@@ -1295,6 +1295,15 @@ p {
 .detail-action .next-action {
   margin: 0;
 }
+.lead-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.lead-contact-actions a {
+  text-decoration: none;
+}
 .detail-facts a {
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;

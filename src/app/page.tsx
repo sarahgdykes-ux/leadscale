@@ -18,6 +18,7 @@ import {
   ScoreMark,
   SourceTag,
 } from "@/components/lead/LeadSignals";
+import { LeadContactActions } from "@/components/lead/LeadContactActions";
 import { useLeadDesk, type DeskLead } from "@/hooks/useLeadDesk";
 import {
   FOLLOW_UP_STATUS_LABELS,
@@ -246,6 +247,11 @@ function LeadDetail({
           Copy next action
         </Button>
       </section>
+      <LeadContactActions
+        name={lead.lead.name}
+        email={lead.lead.email}
+        phone={lead.lead.phone}
+      />
       <section className="detail-section follow-up-section" aria-labelledby="follow-up-title">
         <h3 id="follow-up-title">Follow-up plan</h3>
         <p className="follow-up-help">
