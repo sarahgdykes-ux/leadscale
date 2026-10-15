@@ -19,9 +19,19 @@ import {
   SourceTag,
 } from "@/components/lead/LeadSignals";
 import { useLeadDesk, type DeskLead } from "@/hooks/useLeadDesk";
+import {
+  FOLLOW_UP_STATUS_LABELS,
+  FOLLOW_UP_STORAGE_KEY,
+  FollowUpRecordsSchema,
+  isFollowUpDue,
+  localDateString,
+  type FollowUpRecord,
+  type FollowUpStatus,
+} from "@/lib/followUp";
 
 type PriorityFilter = "ALL" | Priority;
 type SortOrder = "score" | "recent";
+type QueueView = "all" | "due";
 
 const priorityFilters: { value: PriorityFilter; label: string }[] = [
   { value: "ALL", label: "All leads" },
@@ -86,10 +96,12 @@ function currencyRange(lead: DeskLead["lead"]): string {
 function LeadRow({
   lead,
   rank,
+  followUp,
   onSelect,
 }: {
   lead: DeskLead;
   rank: number;
+  followUp: FollowUpRecord;
   onSelect: () => void;
 }) {
   const name = lead.lead.name;
@@ -103,6 +115,9 @@ function LeadRow({
           <span className="row-name-line">
             <span className="row-name">{name}</span>
             <PriorityBadge priority={lead.assessment.priority} />
+            <span className="follow-up-label">
+              {FOLLOW_UP_STATUS_LABELS[followUp.status]}
+            </span>
           </span>
           <span className="row-property" title={propertyLabel(lead.lead)}>
             {propertyLabel(lead.lead)}
@@ -183,13 +198,15 @@ function flagExplanation(flag: string): { title: string; detail: string } | null
 function LeadDetail({
   lead,
   onNavigate,
-  isHandled,
-  onToggleHandled,
+  followUp,
+  followUpLoaded,
+  onFollowUpChange,
 }: {
   lead: DeskLead;
   onNavigate: (direction: -1 | 1) => void;
-  isHandled: boolean;
-  onToggleHandled: () => void;
+  followUp: FollowUpRecord;
+  followUpLoaded: boolean;
+  onFollowUpChange: (update: Partial<FollowUpRecord>) => void;
 }) {
   const [copyFeedback, setCopyFeedback] = useState("");
   const contact = [lead.lead.email, lead.lead.phone].filter(Boolean).join(" · ");
@@ -228,6 +245,45 @@ function LeadDetail({
         >
           Copy next action
         </Button>
+      </section>
+      <section className="detail-section follow-up-section" aria-labelledby="follow-up-title">
+        <h3 id="follow-up-title">Follow-up plan</h3>
+        <p className="follow-up-help">
+          A demo-only reminder saved in this browser; no message is sent.
+        </p>
+        <div className="follow-up-fields">
+          <label>
+            Status
+            <select
+              value={followUp.status}
+              disabled={!followUpLoaded}
+              onChange={(event) =>
+                onFollowUpChange({
+                  status: event.target.value as FollowUpStatus,
+                })
+              }
+            >
+              {Object.entries(FOLLOW_UP_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Follow-up date
+            <input
+              type="date"
+              value={followUp.dueDate ?? ""}
+              disabled={!followUpLoaded}
+              onChange={(event) =>
+                onFollowUpChange({
+                  dueDate: event.target.value || undefined,
+                })
+              }
+            />
+          </label>
+        </div>
       </section>
       <section className="detail-section">
         <h3>Why</h3>
@@ -383,11 +439,16 @@ function LeadDetail({
           </Button>
           <Button
             size="small"
-            variant={isHandled ? "primary" : "secondary"}
-            aria-pressed={isHandled}
-            onClick={onToggleHandled}
+            disabled={!followUpLoaded}
+            variant={followUp.status === "DONE" ? "primary" : "secondary"}
+            aria-pressed={followUp.status === "DONE"}
+            onClick={() =>
+              onFollowUpChange({
+                status: followUp.status === "DONE" ? "NEW" : "DONE",
+              })
+            }
           >
-            {isHandled ? "Handled" : "Mark handled"}
+            {followUp.status === "DONE" ? "Reopen follow-up" : "Mark handled"}
           </Button>
         </div>
       </div>
@@ -441,16 +502,86 @@ export default function Home() {
   const { state, reload } = useLeadDesk();
   const [priority, setPriority] = useState<PriorityFilter>("ALL");
   const [sortOrder, setSortOrder] = useState<SortOrder>("score");
+  const [queueView, setQueueView] = useState<QueueView>("all");
   const selectedId = useSyncExternalStore(
     subscribeToLeadSelection,
     getSelectedLeadFromUrl,
     getServerSelectedLead,
   );
-  const [handledIds, setHandledIds] = useState<Set<string>>(() => new Set());
+  const [followUps, setFollowUps] = useState<Record<string, FollowUpRecord>>(
+    {},
+  );
+  const [followUpStorageReady, setFollowUpStorageReady] = useState(false);
+  const [followUpLoaded, setFollowUpLoaded] = useState(false);
+  const [followUpNotice, setFollowUpNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => {
+      try {
+        const stored = window.localStorage.getItem(FOLLOW_UP_STORAGE_KEY);
+        if (active) {
+          setFollowUps(
+            stored ? FollowUpRecordsSchema.parse(JSON.parse(stored)) : {},
+          );
+          setFollowUpStorageReady(true);
+        }
+      } catch {
+        if (active) {
+          setFollowUpNotice(
+            "Saved follow-up plans could not be loaded. Changes will stay in memory for this visit.",
+          );
+        }
+      } finally {
+        if (active) setFollowUpLoaded(true);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function updateFollowUp(
+    leadId: string,
+    update: Partial<FollowUpRecord>,
+  ): void {
+    const next = {
+      ...followUps,
+      [leadId]: {
+        ...(followUps[leadId] ?? { status: "NEW" as const }),
+        ...update,
+      },
+    };
+    setFollowUps(next);
+    if (!followUpStorageReady) return;
+    try {
+      window.localStorage.setItem(
+        FOLLOW_UP_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+      setFollowUpNotice("");
+    } catch {
+      setFollowUpNotice(
+        "Follow-up plans could not be saved. Changes will stay in memory for this visit.",
+      );
+    }
+  }
+
   const ranked = state.status === "ready" ? state.ranked : [];
+  const today = localDateString();
+  const followUpFor = (leadId: string): FollowUpRecord =>
+    followUps[leadId] ?? { status: "NEW" };
+  const dueCount = ranked.filter((lead) =>
+    isFollowUpDue(followUps[lead.lead.id], today),
+  ).length;
   const filteredLeads = ranked
     .filter(
       (lead) => priority === "ALL" || lead.assessment.priority === priority,
+    )
+    .filter(
+      (lead) =>
+        queueView === "all" ||
+        isFollowUpDue(followUps[lead.lead.id], today),
     )
     .sort((left, right) =>
       sortOrder === "score"
@@ -563,6 +694,19 @@ export default function Home() {
           </span>
         </div>
         <div className="desk-toolbar">
+          <span className="follow-up-summary" role="status">
+            {dueCount} follow-up{dueCount === 1 ? "" : "s"} due now on this page
+          </span>
+          <Button
+            size="small"
+            variant={queueView === "due" ? "primary" : "secondary"}
+            aria-pressed={queueView === "due"}
+            onClick={() =>
+              setQueueView((current) => (current === "due" ? "all" : "due"))
+            }
+          >
+            {queueView === "due" ? "Show all leads" : "Show due now"}
+          </Button>
           <Button
             size="small"
             onClick={() => {
@@ -572,6 +716,11 @@ export default function Home() {
             Re-prioritize
           </Button>
         </div>
+        {followUpNotice ? (
+          <p className="follow-up-notice" role="status">
+            {followUpNotice}
+          </p>
+        ) : null}
       </section>
 
       <div className="desk-layout">
@@ -587,8 +736,8 @@ export default function Home() {
           <Card className="featured-card">
             <div className="featured-topline">
               <span className="eyebrow">
-                <span className="featured-mark" aria-hidden="true" /> NEXT TO
-                CONTACT
+                <span className="featured-mark" aria-hidden="true" />{" "}
+                {queueView === "due" ? "FOLLOW-UP DUE" : "NEXT TO CONTACT"}
               </span>
               <span className="featured-rank">
                 01{" "}
@@ -640,14 +789,27 @@ export default function Home() {
           </Card>
         ) : (
           <Card className="featured-card empty-feature">
-            <p className="eyebrow">NO MATCHING LEADS</p>
-            <h2>Nothing in this priority yet.</h2>
-            <p>Clear the priority filter to return to the full queue.</p>
+            <p className="eyebrow">
+              {queueView === "due" ? "FOLLOW-UP QUEUE" : "NO MATCHING LEADS"}
+            </p>
+            <h2>
+              {queueView === "due"
+                ? "No follow-ups due right now."
+                : "Nothing in this priority yet."}
+            </h2>
+            <p>
+              {queueView === "due"
+                ? "You’re up to date. Return to all leads to plan another follow-up."
+                : "Clear the priority filter to return to the full queue."}
+            </p>
             <Button
               size="small"
-              onClick={() => setPriority("ALL")}
+              onClick={() => {
+                setQueueView("all");
+                setPriority("ALL");
+              }}
             >
-              Clear filters
+              {queueView === "due" ? "Show all leads" : "Clear filters"}
             </Button>
           </Card>
         )}
@@ -694,12 +856,17 @@ export default function Home() {
                 key={lead.lead.id}
                 lead={lead}
                 rank={index + 2}
+                followUp={followUpFor(lead.lead.id)}
                 onSelect={() => writeLeadUrl(lead.lead.id, false)}
               />
             ))}
           </ol>
           {queue.length === 0 && featured ? (
-            <p className="queue-empty">No other leads in this view.</p>
+            <p className="queue-empty">
+              {queueView === "due"
+                ? "No other follow-ups due now."
+                : "No other leads in this view."}
+            </p>
           ) : null}
           {state.leadCount > state.pageSize ? (
             <div className="queue-pagination" role="group" aria-label="Lead pages">
@@ -782,6 +949,11 @@ export default function Home() {
               </p>
               <LeadDetail
                 lead={selected}
+                followUp={followUpFor(selected.lead.id)}
+                followUpLoaded={followUpLoaded}
+                onFollowUpChange={(update) =>
+                  updateFollowUp(selected.lead.id, update)
+                }
                 onNavigate={(direction) => {
                   const next =
                     filteredLeads[
@@ -789,15 +961,6 @@ export default function Home() {
                         filteredLeads.length
                     ];
                   if (next) writeLeadUrl(next.lead.id, true);
-                }}
-                isHandled={handledIds.has(selected.lead.id)}
-                onToggleHandled={() => {
-                  setHandledIds((current) => {
-                    const next = new Set(current);
-                    if (next.has(selected.lead.id)) next.delete(selected.lead.id);
-                    else next.add(selected.lead.id);
-                    return next;
-                  });
                 }}
               />
             </Dialog.Content>

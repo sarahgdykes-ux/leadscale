@@ -582,6 +582,15 @@ p {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.follow-up-label {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--type-label);
+  font-weight: 600;
+  line-height: 1.35;
+}
 .row-property,
 .row-action {
   overflow: hidden;
@@ -1207,8 +1216,49 @@ p {
 
 .desk-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
   justify-content: flex-end;
   margin-top: var(--space-4);
+}
+.follow-up-summary {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+.follow-up-notice {
+  margin: var(--space-2) 0 0;
+  color: var(--accent-dark);
+  font-size: var(--type-label);
+}
+.follow-up-help {
+  margin: var(--space-2) 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--type-label);
+}
+.follow-up-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.follow-up-fields label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--type-label);
+  font-weight: 700;
+}
+.follow-up-fields select,
+.follow-up-fields input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
 }
 .detail-meta {
   display: flex;
@@ -1403,6 +1453,9 @@ p {
   }
   .detail-action > .button {
     align-self: flex-end;
+  }
+  .follow-up-fields {
+    grid-template-columns: 1fr;
   }
   .detail-actions {
     align-items: stretch;

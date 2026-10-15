@@ -27,8 +27,9 @@ The current DB repository merges duplicate contacts during intake based on norma
 - Error: `GET /api/leads?simulate=error` returns a generic structured error.
 - Partial failure: import one valid and one invalid row and show `imported`, `skipped`, and row messages.
 - Fallback: `POST /api/prioritize?simulate=fallback` produces `meta[].source = "fallback"` in mock mode.
+- Follow-up workflow: open a lead, choose New, Contacted, Tour scheduled, Nurture, or Handled, then set a date. Use **Show due now** to view overdue and today's active follow-ups. Plans are saved only in that browser's local storage; this demo does not send messages or write follow-up data to the API/database.
 
-These switches are API-only; use curl or the browser Network panel. They are disabled unless `AGENT_MODE=mock`.
+The simulation switches above are API-only; use curl or the browser Network panel. They are disabled unless `AGENT_MODE=mock`.
 
 ## Backup Plan
 
